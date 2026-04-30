@@ -19,12 +19,12 @@
                 <el-input
                     v-model="newStockCode"
                     placeholder="新增股票代码（如 600519）"
-                    style="width: 220px"
+                    class="new_stock_input"
                     @keyup.enter="addStock"
                     clearable
                 ></el-input>
                 <el-button type="primary" @click="addStock">添加</el-button>
-                <el-divider direction="vertical"></el-divider>
+                <el-divider direction="vertical" class="actions_divider"></el-divider>
                 <el-button type="warning" @click="syncPrices" :loading="loading.price">同步股价（含市值）</el-button>
                 <el-button type="info" @click="syncFundamentals" :loading="loading.fundamental">同步分红/利润</el-button>
                 <el-button type="success" @click="syncAll" :loading="loading.all">一键同步全部（股价/市值/分红利润）</el-button>
@@ -55,20 +55,30 @@
                 ></el-progress>
             </div>
 
+            <div class="table_scroll_wrap">
             <el-table
                 :data="rows"
                 border
                 stripe
                 size="small"
                 class="compact_table"
-                style="width: 100%"
+                style="width: max-content; min-width: 100%"
                 :default-sort="{ prop: 'this_year_estimated_yield', order: 'descending' }"
                 @cell-dblclick="onCellDblClick"
                 v-loading="loading.list"
                 empty-text="暂无数据，先点右上角『一键同步全部』"
             >
-                <el-table-column prop="code" label="股票代码" width="90" sortable header-cell-class-name="readonly_col_header"></el-table-column>
-                <el-table-column prop="name" label="股名" width="100" header-cell-class-name="readonly_col_header"></el-table-column>
+                <el-table-column
+                    prop="name"
+                    label="股名"
+                    width="96"
+                    min-width="88"
+                    fixed="left"
+                    show-overflow-tooltip
+                    header-cell-class-name="readonly_col_header sticky_name_header"
+                    class-name="sticky_name_cell"
+                ></el-table-column>
+                <el-table-column prop="code" label="代码" width="86" sortable header-cell-class-name="readonly_col_header"></el-table-column>
                 <el-table-column prop="industry" label="行业" width="100" header-cell-class-name="readonly_col_header"></el-table-column>
                 <el-table-column label="数据日期" width="96" align="center" header-cell-class-name="readonly_col_header">
                     <template #default="{ row }">
@@ -161,6 +171,7 @@
                     </template>
                 </el-table-column>
             </el-table>
+            </div>
 
             <div class="footer_tip">
                 <p><strong>说明：</strong></p>

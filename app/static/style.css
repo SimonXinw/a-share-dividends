@@ -13,10 +13,13 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    row-gap: 10px;
     background: #fff;
     border-bottom: 1px solid #e4e7ed;
     padding: 0 24px;
-    height: 64px !important;
+    min-height: 64px;
+    height: auto !important;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
@@ -35,7 +38,45 @@ html, body {
 .page_header .actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
+}
+
+.new_stock_input {
+    width: 220px;
+    max-width: 100%;
+}
+
+.table_scroll_wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 4px;
+}
+
+/* 左侧固定「股名」列：表头与其它只读列一致，表体不透底 */
+.compact_table th.sticky_name_header {
+    background-color: #f5f7fa !important;
+}
+
+.compact_table .sticky_name_cell {
+    background-color: #ffffff !important;
+}
+
+.compact_table.el-table--striped .el-table__body tr.el-table__row--striped .sticky_name_cell {
+    background-color: #fafafa !important;
+}
+
+.compact_table .el-table__fixed-left .sticky_name_cell {
+    background-color: #ffffff !important;
+}
+
+.compact_table.el-table--striped .el-table__fixed-left .el-table__body tr.el-table__row--striped .sticky_name_cell {
+    background-color: #fafafa !important;
+}
+
+.compact_table .el-table__fixed-left {
+    box-shadow: 4px 0 12px rgba(0, 0, 0, 0.06);
 }
 
 .page_main {
@@ -162,4 +203,59 @@ html, body {
 
 .compact_table .el-table__cell {
     padding: 6px 4px !important;
+}
+
+@media (max-width: 900px) {
+    .page_header {
+        padding: 12px 14px;
+    }
+
+    .page_header .title .sub {
+        display: block;
+        margin-top: 4px;
+    }
+
+    .page_main {
+        padding: 12px 10px;
+    }
+
+    .new_stock_input {
+        flex: 1 1 200px;
+        width: auto !important;
+        min-width: 140px;
+    }
+
+    .actions_divider {
+        display: none;
+    }
+
+    .footer_tip {
+        font-size: 12px;
+        padding: 12px 14px;
+    }
+
+    .compact_table .el-table__header-wrapper .el-table__cell .cell,
+    .compact_table .el-table__body-wrapper .el-table__cell .cell {
+        font-size: 11px;
+    }
+
+    .compact_table .el-table__cell {
+        padding: 5px 3px !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .page_header .title .main {
+        font-size: 16px;
+    }
+
+    .page_header .actions .el-button {
+        padding: 6px 10px;
+    }
+
+    .page_header .actions .el-button--success span,
+    .page_header .actions .el-button--warning span,
+    .page_header .actions .el-button--info span {
+        font-size: 12px;
+    }
 }
