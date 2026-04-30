@@ -1,0 +1,112 @@
+html, body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f7fa;
+}
+
+.page {
+    min-height: 100vh;
+}
+
+.page_header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #fff;
+    border-bottom: 1px solid #e4e7ed;
+    padding: 0 24px;
+    height: 64px !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.page_header .title .main {
+    font-size: 18px;
+    font-weight: 700;
+    color: #303133;
+    margin-right: 12px;
+}
+
+.page_header .title .sub {
+    font-size: 13px;
+    color: #909399;
+}
+
+.page_header .actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.page_main {
+    padding: 20px 24px;
+}
+
+.muted {
+    color: #c0c4cc;
+}
+
+.readonly {
+    color: #606266;
+}
+
+.yield_high {
+    color: #f56c6c;
+    font-weight: 600;
+}
+
+.yield_mid {
+    color: #e6a23c;
+    font-weight: 600;
+}
+
+.yield_low {
+    color: #909399;
+}
+
+.editable_cell {
+    cursor: pointer;
+    display: inline-block;
+    min-width: 60px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.editable_cell:hover {
+    background-color: #ecf5ff;
+}
+
+.editable_cell .edit_icon {
+    color: #c0c4cc;
+    margin-left: 4px;
+    font-size: 12px;
+    visibility: hidden;
+}
+
+.editable_cell:hover .edit_icon {
+    visibility: visible;
+}
+
+.footer_tip {
+    margin-top: 24px;
+    padding: 16px 20px;
+    background: #fff;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+    color: #606266;
+    font-size: 13px;
+    line-height: 1.8;
+}
+
+.footer_tip ul {
+    margin: 8px 0 0 18px;
+    padding: 0;
+}
+
+.footer_tip code {
+    background: #f4f4f5;
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: #e6a23c;
+}
