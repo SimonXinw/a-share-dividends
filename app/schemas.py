@@ -18,6 +18,14 @@ class StockRow(BaseModel):
     industry: Optional[str] = None
 
     price: Optional[Decimal] = Field(None, description="当前股价")
+    current_market_cap: Optional[Decimal] = Field(None, description="当前市值")
+    last_year_end_market_cap: Optional[Decimal] = Field(None, description="去年年末市值")
+    last_year_end_price: Optional[Decimal] = Field(None, description="去年年末收盘价")
+    last_year_end_date: Optional[date] = Field(None, description="去年年末交易日")
+    price_date: Optional[date] = Field(None, description="价格日期")
+    price_sync_date: Optional[date] = Field(None, description="价格同步日期")
+    fundamental_sync_date: Optional[date] = Field(None, description="基本面同步日期")
+    sync_date: Optional[date] = Field(None, description="综合数据日期")
 
     last_year: Optional[int] = Field(None, description="去年的会计年度，如 2024")
     last_year_dividend: Optional[Decimal] = Field(None, description="去年每股分红（元/股）")

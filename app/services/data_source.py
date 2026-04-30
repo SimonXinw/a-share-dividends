@@ -17,12 +17,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
+from datetime import datetime, timezone, date
 from decimal import Decimal, InvalidOperation
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from .. import database
 
 logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[dict], Awaitable[None]]
 
 
 # ============================================================================
@@ -59,64 +62,169 @@ def _akshare_symbol(code: str) -> str:
 # ============================================================================
 # 价格同步
 # ============================================================================
-async def sync_prices(codes: list[str] | None = None) -> int:
-    """同步当前股价。一次性拉取全市场行情后筛出我们关心的股票，效率最高。"""
-    import akshare as ak  # 延迟引入，避免在没装 akshare 的开发环境启动时报错
-    import pandas as pd  # noqa: F401
+async def sync_prices(codes: list[str] | None = None, progress_cb: ProgressCallback | None = None) -> int:
+    """同步当前股价（逐股票拉取日线最新收盘价）。"""
 
     logger.info("开始同步股价...")
 
-    df = await asyncio.to_thread(ak.stock_zh_a_spot_em)
-
-    if df is None or df.empty:
-        logger.warning("akshare 返回空行情数据")
-        return 0
-
-    code_col = "代码"
-    name_col = "名称"
-    price_col = "最新价"
-
     # 如果传了 codes 就过滤，否则同步所有数据库里 active 的股票
     if codes is None:
-        rows = await database.fetch_all("select code from public.a_share_stocks where is_active = true")
-        codes = [r["code"] for r in rows]
+        today = datetime.now(timezone.utc).date()
+        codes = await database.list_price_sync_candidates(today)
+        logger.info("价格同步待处理 %d 只（已跳过今日已同步且价格/市值完整的股票）", len(codes))
 
-    code_set = set(codes)
+    return await _sync_prices_fallback_by_daily(codes, progress_cb=progress_cb)
 
+
+async def _sync_prices_fallback_by_daily(
+    codes: list[str],
+    progress_cb: ProgressCallback | None = None,
+) -> int:
+    """降级路径：按股票逐个拉日线，取最新收盘价作为当前价。"""
+    import akshare as ak
+    import pandas as pd
+
+    # py_mini_racer 在 Windows + Python 3.13 下并发调用存在稳定性问题，
+    # 这里降为串行，优先保证任务可完成。
+    sem = asyncio.Semaphore(1)
+    total = len(codes)
+    processed = 0
     affected = 0
+    failed = 0
+    lock = asyncio.Lock()
 
-    async with database.acquire() as conn:
-        async with conn.transaction():
-            for _, r in df.iterrows():
-                code = str(r[code_col]).zfill(6)
-                if code not in code_set:
-                    continue
-                price = _to_decimal(r.get(price_col))
-                name = str(r.get(name_col, "")).strip()
+    async def handle(code: str) -> None:
+        nonlocal affected, failed, processed
+        symbol = f"{_market_prefix(code).lower()}{code}"
+        success = False
 
-                if price is None:
-                    continue
+        df = None
+        for attempt in range(1, 4):
+            async with sem:
+                try:
+                    df = await asyncio.to_thread(ak.stock_zh_a_daily, symbol=symbol)
+                    break
+                except Exception as e:  # noqa: BLE001
+                    if attempt >= 3:
+                        logger.warning("[%s] 降级拉取日线失败（第 %d/3 次）：%s", code, attempt, e)
+                        async with lock:
+                            processed += 1
+                            failed += 1
+                            if progress_cb is not None:
+                                await progress_cb(
+                                    {
+                                        "stage": "price",
+                                        "processed": processed,
+                                        "total": total,
+                                        "success": affected,
+                                        "failed": failed,
+                                        "code": code,
+                                    }
+                                )
+                        return
 
-                if name:
-                    await conn.execute(
-                        "update public.a_share_stocks set name = $1 where code = $2 and (name is null or name = '' or name <> $1)",
-                        name, code,
+                    wait_seconds = random.randint(1, 3)
+                    logger.warning(
+                        "[%s] 降级拉取日线失败（第 %d/3 次），%d 秒后重试：%s",
+                        code,
+                        attempt,
+                        wait_seconds,
+                        e,
                     )
 
-                await conn.execute(
-                    """
-                    insert into public.a_share_prices (code, price, price_date, updated_at)
-                    values ($1, $2, current_date, now())
-                    on conflict (code) do update
-                       set price = excluded.price,
-                           price_date = excluded.price_date,
-                           updated_at = now()
-                    """,
-                    code, price,
-                )
-                affected += 1
+            await asyncio.sleep(wait_seconds)
 
-    logger.info("股价同步完成，共 %d 条", affected)
+        if df is None or df.empty:
+            async with lock:
+                processed += 1
+                failed += 1
+                if progress_cb is not None:
+                    await progress_cb(
+                        {
+                            "stage": "price",
+                            "processed": processed,
+                            "total": total,
+                            "success": affected,
+                            "failed": failed,
+                            "code": code,
+                        }
+                    )
+            return
+
+        last_row = df.iloc[-1]
+        price = _to_decimal(last_row.get("close"))
+        if price is None:
+            async with lock:
+                processed += 1
+                failed += 1
+                if progress_cb is not None:
+                    await progress_cb(
+                        {
+                            "stage": "price",
+                            "processed": processed,
+                            "total": total,
+                            "success": affected,
+                            "failed": failed,
+                            "code": code,
+                        }
+                    )
+            return
+
+        latest_share_count = _to_decimal(last_row.get("outstanding_share"))
+        current_market_cap = None
+        if latest_share_count is not None:
+            current_market_cap = price * latest_share_count
+
+        last_year = datetime.now(timezone.utc).year - 1
+        cutoff = date(last_year, 12, 31)
+        year_rows = None
+        if "date" in df.columns:
+            parsed_dates = pd.to_datetime(df["date"], errors="coerce")
+            year_rows = df[parsed_dates.dt.date <= cutoff]
+
+        last_year_end_price = None
+        last_year_end_market_cap = None
+        last_year_end_date = None
+        if year_rows is not None and not year_rows.empty:
+            year_last_row = year_rows.iloc[-1]
+            year_last_close = _to_decimal(year_last_row.get("close"))
+            year_last_share = _to_decimal(year_last_row.get("outstanding_share"))
+            if year_last_close is not None:
+                last_year_end_price = year_last_close
+            if year_last_close is not None and year_last_share is not None:
+                last_year_end_market_cap = year_last_close * year_last_share
+            year_last_date = year_last_row.get("date")
+            if year_last_date is not None:
+                last_year_end_date = str(year_last_date)[:10]
+
+        await database.upsert_price_with_market_values(
+            code=code,
+            price=price,
+            current_market_cap=current_market_cap,
+            last_year_end_price=last_year_end_price,
+            last_year_end_market_cap=last_year_end_market_cap,
+            last_year_end_date=last_year_end_date,
+        )
+        success = True
+        async with lock:
+            processed += 1
+            affected += 1
+            if not success:
+                failed += 1
+            if progress_cb is not None:
+                await progress_cb(
+                    {
+                        "stage": "price",
+                        "processed": processed,
+                        "total": total,
+                        "success": affected,
+                        "failed": failed,
+                        "code": code,
+                    }
+                )
+
+    await asyncio.gather(*(handle(code) for code in codes), return_exceptions=False)
+    logger.info("股价同步（降级）完成，共 %d 条", affected)
     return affected
 
 
@@ -261,98 +369,98 @@ async def _fetch_quarterly_profits_one(code: str) -> list[dict]:
     return result
 
 
-async def sync_dividends_and_profits(codes: list[str] | None = None, concurrency: int = 5) -> int:
+async def sync_dividends_and_profits(
+    codes: list[str] | None = None,
+    concurrency: int = 5,
+    progress_cb: ProgressCallback | None = None,
+) -> int:
     """同步分红 + 季度利润。"""
     if codes is None:
-        rows = await database.fetch_all("select code from public.a_share_stocks where is_active = true")
-        codes = [r["code"] for r in rows]
+        today = datetime.now(timezone.utc).date()
+        codes = await database.list_fundamental_sync_candidates(today)
+        logger.info("分红/利润待处理 %d 只（已跳过今日已同步且有基本面的股票）", len(codes))
+
+    safe_concurrency = max(1, min(concurrency, 5))
+    if safe_concurrency != concurrency:
+        logger.info("分红/利润并发从 %d 调整为 %d（稳定性保护）", concurrency, safe_concurrency)
 
     logger.info("开始同步分红/利润，共 %d 只股票", len(codes))
 
-    sem = asyncio.Semaphore(concurrency)
+    sem = asyncio.Semaphore(safe_concurrency)
+    total = len(codes)
+    processed = 0
     affected = 0
+    failed = 0
     lock = asyncio.Lock()
 
     async def handle(code: str) -> None:
-        nonlocal affected
+        nonlocal affected, failed, processed
         async with sem:
             divs = await _fetch_dividends_one(code)
             profits = await _fetch_quarterly_profits_one(code)
 
         async with lock:
-            async with database.acquire() as conn:
-                async with conn.transaction():
-                    # 写入年度分红
-                    for d in divs:
-                        # 如果同年有利润数据，可以推算 net_profit / payout_ratio
-                        year = d["year"]
-                        # 当年净利润 = 4 个季度之和（如果都有）
-                        full_year_profit = None
-                        q_in_year = [p for p in profits if p["year"] == year]
-                        if len(q_in_year) == 4:
-                            full_year_profit = sum((p["net_profit"] for p in q_in_year), Decimal("0"))
+            # 写入年度分红
+            for d in divs:
+                # 如果同年有利润数据，可以推算 net_profit / payout_ratio
+                year = d["year"]
+                # 当年净利润 = 4 个季度之和（如果都有）
+                full_year_profit = None
+                q_in_year = [p for p in profits if p["year"] == year]
+                if len(q_in_year) == 4:
+                    full_year_profit = sum((p["net_profit"] for p in q_in_year), Decimal("0"))
 
-                        payout_ratio = None
-                        if full_year_profit and full_year_profit != 0:
-                            # 假设总股本未知，无法得到分红总额；这里用 payout_ratio 字段保存
-                            # 「每股分红 / 每股净利润」也成立，因股本相同，约掉。
-                            # 取近似：payout_ratio ~ dividend_per_share / (full_year_profit / shares)
-                            # 由于没股本，留空，前端不强依赖此字段。
-                            payout_ratio = None
+                payout_ratio = None
+                if full_year_profit and full_year_profit != 0:
+                    # 假设总股本未知，无法得到分红总额；这里用 payout_ratio 字段保存
+                    # 「每股分红 / 每股净利润」也成立，因股本相同，约掉。
+                    # 取近似：payout_ratio ~ dividend_per_share / (full_year_profit / shares)
+                    # 由于没股本，留空，前端不强依赖此字段。
+                    payout_ratio = None
 
-                        await conn.execute(
-                            """
-                            insert into public.a_share_dividends
-                                (code, year, dividend_per_share, net_profit, payout_ratio, source, updated_at)
-                            values ($1, $2, $3, $4, $5, 'akshare', now())
-                            on conflict (code, year) do update set
-                                dividend_per_share = excluded.dividend_per_share,
-                                net_profit = coalesce(excluded.net_profit, public.a_share_dividends.net_profit),
-                                payout_ratio = coalesce(excluded.payout_ratio, public.a_share_dividends.payout_ratio),
-                                source = 'akshare',
-                                updated_at = now()
-                            """,
-                            code, year, d["dividend_per_share"], full_year_profit, payout_ratio,
-                        )
+                await database.upsert_dividend_row(
+                    code=code,
+                    year=year,
+                    dividend_per_share=d["dividend_per_share"],
+                    net_profit=full_year_profit,
+                    payout_ratio=payout_ratio,
+                )
 
-                    # 单独再写一遍年度利润（即使无分红记录）
-                    by_year: dict[int, Decimal] = {}
-                    by_year_count: dict[int, int] = {}
-                    for p in profits:
-                        by_year[p["year"]] = by_year.get(p["year"], Decimal("0")) + p["net_profit"]
-                        by_year_count[p["year"]] = by_year_count.get(p["year"], 0) + 1
-                    for y, v in by_year.items():
-                        if by_year_count.get(y) == 4:
-                            await conn.execute(
-                                """
-                                insert into public.a_share_dividends
-                                    (code, year, dividend_per_share, net_profit, source, updated_at)
-                                values ($1, $2, 0, $3, 'akshare', now())
-                                on conflict (code, year) do update set
-                                    net_profit = excluded.net_profit,
-                                    updated_at = now()
-                                """,
-                                code, y, v,
-                            )
+            # 单独再写一遍年度利润（即使无分红记录）
+            by_year: dict[int, Decimal] = {}
+            by_year_count: dict[int, int] = {}
+            for p in profits:
+                by_year[p["year"]] = by_year.get(p["year"], Decimal("0")) + p["net_profit"]
+                by_year_count[p["year"]] = by_year_count.get(p["year"], 0) + 1
+            for y, v in by_year.items():
+                if by_year_count.get(y) == 4:
+                    await database.upsert_dividend_profit_only(code, y, v)
 
-                    # 写入季度利润
-                    for p in profits:
-                        await conn.execute(
-                            """
-                            insert into public.a_share_quarterly_profits
-                                (code, year, quarter, net_profit, is_published, source, updated_at)
-                            values ($1, $2, $3, $4, true, 'akshare', now())
-                            on conflict (code, year, quarter) do update set
-                                net_profit = excluded.net_profit,
-                                is_published = true,
-                                source = 'akshare',
-                                updated_at = now()
-                            """,
-                            code, p["year"], p["quarter"], p["net_profit"],
-                        )
+            # 写入季度利润
+            for p in profits:
+                await database.upsert_quarterly_profit(
+                    code=code,
+                    year=p["year"],
+                    quarter=p["quarter"],
+                    net_profit=p["net_profit"],
+                )
 
-                    affected += 1
-                    logger.info("[%s] 已同步：分红 %d 条，季度利润 %d 条", code, len(divs), len(profits))
+            await database.mark_fundamental_synced(code)
+            processed += 1
+            affected += 1
+            # fundamentals 允许部分数据为空，只要流程完成即视为成功
+            if progress_cb is not None:
+                await progress_cb(
+                    {
+                        "stage": "fundamental",
+                        "processed": processed,
+                        "total": total,
+                        "success": affected,
+                        "failed": failed,
+                        "code": code,
+                    }
+                )
+            logger.info("[%s] 已同步：分红 %d 条，季度利润 %d 条", code, len(divs), len(profits))
 
     await asyncio.gather(*(handle(c) for c in codes), return_exceptions=False)
 

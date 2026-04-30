@@ -42,6 +42,32 @@ html, body {
     padding: 20px 24px;
 }
 
+.sync_progress_card {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    background: #fff;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+}
+
+.sync_progress_header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.sync_progress_header .title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #303133;
+}
+
+.sync_progress_header .detail {
+    font-size: 12px;
+    color: #909399;
+}
+
 .muted {
     color: #c0c4cc;
 }
@@ -109,4 +135,31 @@ html, body {
     padding: 1px 6px;
     border-radius: 3px;
     color: #e6a23c;
+}
+
+.editable_col_header .cell {
+    color: #e6a23c;
+    font-weight: 700;
+}
+
+.readonly_col_header {
+    background: #f5f7fa !important;
+}
+
+.readonly_col_header .cell {
+    color: #606266;
+    font-weight: 600;
+}
+
+.compact_table .el-table__header-wrapper .el-table__cell .cell {
+    font-size: 12px;
+}
+
+.compact_table .el-table__body-wrapper .el-table__cell .cell {
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+.compact_table .el-table__cell {
+    padding: 6px 4px !important;
 }

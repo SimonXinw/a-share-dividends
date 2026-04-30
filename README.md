@@ -7,7 +7,7 @@
 
 ## 1. 功能一览
 
-- 表格列：**股票代码 / 股名 / 行业 / 当前股价 / 去年 / 去年每股分红 / 去年股息率 / 去年净利润 / 今年预估净利润 / 今年预估每股分红 / 今年预估股息率 / 备注**
+- 表格列：**股票代码 / 股名 / 行业 / 当前股价 / 数据日期 / 当前市值 / 去年年末市值 / 去年 / 去年每股分红 / 去年股息率 / 去年净利润 / 今年预估净利润 / 今年预估每股分红 / 今年预估股息率 / 备注**
 - **降序排序**：默认按"今年预估股息率"降序，所有数值列也都支持点列头排序
 - **任意单元格双击编辑**：编辑后立即重新计算「股息率」「预估每股分红」「预估股息率」并保存
 - 编辑保存到 `a_share_overrides` 表，**不污染**原始抓取数据；点"恢复原值"可清除覆盖
@@ -18,7 +18,7 @@
 
 > 这是产品需求里最关键的一段，对应实现见 `app/services/calculator.py`。
 
-```
+```text
 今年预估全年净利润
     = 去年全年净利润
     - 去年「今年已发布的对应季度」净利润之和
@@ -49,7 +49,8 @@
 **结论：使用 AKShare**。无需注册、无需登录、不限流（频率注意点别打爆即可）。
 
 实际用到的接口：
-- 当前股价：`ak.stock_zh_a_spot_em()`（一次性返回全市场行情）
+
+- 当前股价/年末价/市值：`ak.stock_zh_a_daily(symbol="600519")`（按单只股票拉取并计算）
 - 分红明细：`ak.stock_fhps_detail_em(symbol="600519")`
 - 季度利润：`ak.stock_profit_sheet_by_report_em(symbol="SH600519")`
 
@@ -59,7 +60,7 @@
 
 1. AKShare、pandas、numpy 等金融数据生态远胜 Node
 2. 数据清洗、季度利润累计 → 单季计算等用 pandas 写起来非常自然
-3. FastAPI + asyncpg 的性能足够这种自用工具
+3. FastAPI + Supabase HTTP API 对这类自用工具已足够，且避免本地直连 PostgreSQL 的网络兼容问题
 4. 如果选 Node，需要自己写爬虫去调东方财富接口，工作量增加 5-10 倍
 
 ### 2.3 前端
@@ -76,12 +77,12 @@
 
 > 项目采用扁平结构：所有 Python 代码、Dockerfile、依赖清单都直接放在根目录，不再有 `backend/` 中间层。
 
-```
+```text
 a-share-dividends/
 ├── app/                         # FastAPI 应用包（Python 模块名就是 app）
 │   ├── main.py                  # 入口（uvicorn app.main:app）
 │   ├── config.py                # 配置（自动从项目根 .env 读取）
-│   ├── database.py              # asyncpg 连接池
+│   ├── database.py              # Supabase HTTP 访问封装（仓储层）
 │   ├── schemas.py               # Pydantic 模型
 │   ├── routers/
 │   │   ├── stocks.py            # 列表/编辑/新增/删除
@@ -127,15 +128,14 @@ a-share-dividends/
 
 会自动给 `updated_at` 字段加触发器，并塞 5 条示例股票（茅台/工行/招行/美的/长江电力），方便启动后立即看到效果。
 
-### 4.2 拿 DATABASE_URL
+### 4.2 配置 Supabase HTTP 访问
 
-Supabase Dashboard → **Project Settings → Database → Connection string** → 选 `URI`：
+Supabase Dashboard → **Project Settings → API**，复制：
 
-```
-postgresql://postgres.xxxxxxxx:[YOUR-PASSWORD]@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres
-```
+- `Project URL` -> `.env` 的 `SUPABASE_URL`
+- `service_role`（推荐）或 `anon` -> `.env` 的 `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_ANON_KEY`
 
-把 `[YOUR-PASSWORD]` 替换为真实密码即可，asyncpg 直接兼容这个 URI。
+`DATABASE_URL` 仅作为保留配置，不再是应用启动必须项。
 
 ---
 
@@ -146,7 +146,7 @@ postgresql://postgres.xxxxxxxx:[YOUR-PASSWORD]@aws-0-ap-southeast-1.pooler.supab
 ```powershell
 # 1) 配 .env（项目根目录）
 copy .env.example .env
-# 用编辑器打开 .env，把 DATABASE_URL 改成你真实的 Supabase 连接串
+# 用编辑器打开 .env，至少填好 SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY（或 SUPABASE_ANON_KEY）
 
 # 2) 在【项目根目录】建虚拟环境
 python -m venv .venv
@@ -164,7 +164,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 打开浏览器访问 <http://localhost:8000>，第一次进去表格是空的，点右上角 **「一键同步全部」**，等几十秒到几分钟（取决于股票数量）后刷新就能看到数据。
 
-> **快速验证 .env 被读到了**：启动时如果 DATABASE_URL 没读到，会立即报错 `DATABASE_URL 未配置`；如果正常打印 `数据库连接池已就绪`，说明 .env 已正确加载。
+> **快速验证 .env 被读到了**：启动时如果 `SUPABASE_URL` 或 key 未配置，会立即报错；如果正常打印 `Supabase HTTP 客户端已就绪`，说明 .env 已正确加载。
 
 ---
 
@@ -179,7 +179,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 copy .env.example .env     # Windows
 # cp .env.example .env     # macOS/Linux
 
-# 编辑 .env，填好 DATABASE_URL
+# 编辑 .env，填好 SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY（或 SUPABASE_ANON_KEY）
 
 # 2) 启动
 docker compose up -d --build
@@ -193,7 +193,24 @@ docker compose down
 
 启动后访问 <http://localhost:8000>。
 
-### 6.2 直接 docker run（不用 compose）
+### 6.2 部署到 Render（Docker）
+
+1. 新建 **Web Service**，选择本仓库，Environment 选 **Docker**。  
+1. 端口不用手填，镜像已支持 `PORT` 环境变量（Render 会自动注入）。  
+1. 在 Render 环境变量里至少配置：
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`（或 `SUPABASE_ANON_KEY`，二选一）
+- `SYNC_CONCURRENCY=5`（建议）
+
+1. 部署后先验证：
+
+- `GET /api/health` 返回 `{"ok":true}`
+- 打开根路径 `/` 能加载表格页面
+
+> 注意：应用在启动阶段会初始化 Supabase 客户端。如果 `SUPABASE_URL` 或 key 缺失，Render 会启动失败并反复重启，这是预期保护行为。
+
+### 6.3 直接 docker run（不用 compose）
 
 ```bash
 # 在项目根目录执行（构建上下文就是当前目录）

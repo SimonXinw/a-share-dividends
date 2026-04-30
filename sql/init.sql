@@ -16,12 +16,20 @@ create table if not exists public.a_share_stocks (
 
 create index if not exists idx_a_share_stocks_active on public.a_share_stocks (is_active);
 
+alter table public.a_share_stocks
+    add column if not exists price_sync_date date,
+    add column if not exists fundamental_sync_date date;
+
 
 -- 2. 股票当前价格表（最新一条覆盖式更新） -----------------------------------
 create table if not exists public.a_share_prices (
     code           varchar(10)  primary key references public.a_share_stocks(code) on delete cascade,
     price          numeric(14, 4) not null,                  -- 当前股价
     price_date     date         not null default current_date,
+    current_market_cap numeric(22, 2),                       -- 当前市值（元）
+    last_year_end_price numeric(14, 4),                      -- 去年年末最后交易日收盘价
+    last_year_end_market_cap numeric(22, 2),                 -- 去年年末最后交易日市值（元）
+    last_year_end_date date,                                 -- 去年年末最后交易日
     updated_at     timestamptz  not null default now()
 );
 
@@ -142,7 +150,15 @@ select
     ly_div.last_year as last_year,
     ly_div.payout_ratio,
     o.this_year_estimated_profit as override_this_year_profit,
-    o.note
+    o.note,
+    p.price_date,
+    s.price_sync_date,
+    s.fundamental_sync_date,
+    greatest(s.price_sync_date, s.fundamental_sync_date) as sync_date,
+    p.current_market_cap,
+    p.last_year_end_market_cap,
+    p.last_year_end_price,
+    p.last_year_end_date
 from public.a_share_stocks s
 left join public.a_share_prices p on p.code = s.code
 left join ly_div on ly_div.code = s.code

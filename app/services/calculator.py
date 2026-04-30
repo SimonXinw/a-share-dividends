@@ -37,6 +37,14 @@ class CalculationContext:
     name: str
     industry: str | None
     price: Decimal | None
+    price_date: str | None
+    price_sync_date: str | None
+    fundamental_sync_date: str | None
+    sync_date: str | None
+    current_market_cap: Decimal | None
+    last_year_end_market_cap: Decimal | None
+    last_year_end_price: Decimal | None
+    last_year_end_date: str | None
 
     last_year: int | None
     last_year_dividend: Decimal | None
@@ -117,30 +125,14 @@ def calc_yield(dividend_per_share: Decimal | None, price: Decimal | None) -> Dec
 # ============================================================================
 async def load_all_contexts() -> list[CalculationContext]:
     """从数据库读取所有 active 股票的原始数据并组装成 CalculationContext。"""
-    base_rows = await database.fetch_all(
-        """
-        select
-            code, name, industry, price, last_year,
-            last_year_dividend, last_year_net_profit, payout_ratio,
-            override_this_year_profit, note
-        from public.a_share_dashboard_view
-        order by code
-        """
-    )
+    base_rows = await database.list_dashboard_rows()
 
     if not base_rows:
         return []
 
     codes = [r["code"] for r in base_rows]
 
-    profit_rows = await database.fetch_all(
-        """
-        select code, year, quarter, net_profit
-        from public.a_share_quarterly_profits
-        where code = any($1::varchar[])
-        """,
-        codes,
-    )
+    profit_rows = await database.list_quarterly_profits_by_codes(codes)
 
     last_year_map: dict[str, int | None] = {r["code"]: r["last_year"] for r in base_rows}
 
@@ -168,6 +160,14 @@ async def load_all_contexts() -> list[CalculationContext]:
                 name=r["name"],
                 industry=r.get("industry"),
                 price=_to_decimal(r.get("price")),
+                price_date=r.get("price_date"),
+                price_sync_date=r.get("price_sync_date"),
+                fundamental_sync_date=r.get("fundamental_sync_date"),
+                sync_date=r.get("sync_date"),
+                current_market_cap=_to_decimal(r.get("current_market_cap")),
+                last_year_end_market_cap=_to_decimal(r.get("last_year_end_market_cap")),
+                last_year_end_price=_to_decimal(r.get("last_year_end_price")),
+                last_year_end_date=r.get("last_year_end_date"),
                 last_year=r.get("last_year"),
                 last_year_dividend=_to_decimal(r.get("last_year_dividend")),
                 last_year_net_profit=_to_decimal(r.get("last_year_net_profit")),
@@ -184,7 +184,8 @@ async def load_all_contexts() -> list[CalculationContext]:
 
 def context_to_row(ctx: CalculationContext) -> dict:
     """把 CalculationContext 转成前端表格行需要的字段。"""
-    last_yield = calc_yield(ctx.last_year_dividend, ctx.price)
+    # 去年股息率口径固定：去年每股分红 / 去年年末价格
+    last_yield = calc_yield(ctx.last_year_dividend, ctx.last_year_end_price)
     estimated_profit = estimate_this_year_profit(ctx)
     estimated_div = estimate_this_year_dividend_per_share(ctx)
     estimated_yield = calc_yield(estimated_div, ctx.price)
@@ -194,6 +195,14 @@ def context_to_row(ctx: CalculationContext) -> dict:
         "name": ctx.name,
         "industry": ctx.industry,
         "price": ctx.price,
+        "price_date": ctx.price_date,
+        "price_sync_date": ctx.price_sync_date,
+        "fundamental_sync_date": ctx.fundamental_sync_date,
+        "sync_date": ctx.sync_date,
+        "current_market_cap": ctx.current_market_cap,
+        "last_year_end_market_cap": ctx.last_year_end_market_cap,
+        "last_year_end_price": ctx.last_year_end_price,
+        "last_year_end_date": ctx.last_year_end_date,
         "last_year": ctx.last_year,
         "last_year_dividend": ctx.last_year_dividend,
         "last_year_dividend_yield": last_yield,

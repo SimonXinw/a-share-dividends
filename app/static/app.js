@@ -21,6 +21,13 @@ const formatPercent = (v) => {
     return n.toFixed(2) + " %";
 };
 
+const formatDate = (v) => {
+    if (!v) return "--";
+    const value = String(v);
+    if (value.length >= 10) return value.slice(0, 10);
+    return value;
+};
+
 const num = (v) => {
     if (v === null || v === undefined || v === "") return -Infinity;
     const n = Number(v);
@@ -114,6 +121,21 @@ const App = {
         const message = ref("");
         const messageType = ref("success");
         const newStockCode = ref("");
+        const syncWatchState = reactive({
+            timerId: null,
+            timeoutId: null,
+            jobType: "",
+            startedAtMs: 0,
+            tick: 0,
+            lastLogFingerprint: "",
+        });
+        const syncProgress = reactive({
+            visible: false,
+            title: "",
+            detail: "",
+            percent: 0,
+            status: "success",
+        });
 
         const showMessage = (msg, type = "success") => {
             message.value = msg;
@@ -127,6 +149,10 @@ const App = {
                 const res = await fetch(`${API_BASE}/api/stocks`);
                 const data = await res.json();
                 rows.value = (data.items || []).slice();
+
+                // 前端渲染时做一次兜底重算，再按“今年预估股息率”降序排序。
+                rows.value.forEach((row) => recomputeRow(row));
+                sortByEstimatedYieldDesc();
             } catch (e) {
                 showMessage("加载列表失败：" + e.message, "error");
             } finally {
@@ -136,13 +162,14 @@ const App = {
 
         const recomputeRow = (row) => {
             const price = num(row.price);
+            const lastYearEndPrice = num(row.last_year_end_price);
             const lyDiv = num(row.last_year_dividend);
             const lyProfit = num(row.last_year_net_profit);
             const tyProfit = num(row.this_year_estimated_profit);
 
             row.last_year_dividend_yield =
-                Number.isFinite(price) && price > 0 && Number.isFinite(lyDiv)
-                    ? lyDiv / price
+                Number.isFinite(lastYearEndPrice) && lastYearEndPrice > 0 && Number.isFinite(lyDiv)
+                    ? lyDiv / lastYearEndPrice
                     : null;
 
             if (
@@ -283,12 +310,123 @@ const App = {
             return res.json();
         };
 
+        const stopSyncWatch = () => {
+            if (syncWatchState.timerId) {
+                clearInterval(syncWatchState.timerId);
+            }
+            if (syncWatchState.timeoutId) {
+                clearTimeout(syncWatchState.timeoutId);
+            }
+            syncWatchState.timerId = null;
+            syncWatchState.timeoutId = null;
+            syncWatchState.jobType = "";
+            syncWatchState.startedAtMs = 0;
+            syncWatchState.tick = 0;
+            syncWatchState.lastLogFingerprint = "";
+            syncProgress.visible = false;
+            syncProgress.title = "";
+            syncProgress.detail = "";
+            syncProgress.percent = 0;
+            syncProgress.status = "success";
+        };
+
+        const parseProgress = (message) => {
+            if (!message) return null;
+            const match = String(message).match(/(.+):\s*(\d+)\/(\d+).*成功\s*(\d+).*失败\s*(\d+)/);
+            if (!match) return null;
+            const processed = Number(match[2]);
+            const total = Number(match[3]);
+            const success = Number(match[4]);
+            const failed = Number(match[5]);
+            const percent = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+            return {
+                title: match[1],
+                detail: `成功 ${success}，失败 ${failed}`,
+                percent,
+            };
+        };
+
+        const startSyncWatch = (jobType, label) => {
+            stopSyncWatch();
+            syncWatchState.jobType = jobType;
+            syncWatchState.startedAtMs = Date.now();
+
+            const pollOnce = async () => {
+                syncWatchState.tick += 1;
+                try {
+                    const logsRes = await fetch(`${API_BASE}/api/sync/logs?limit=20`);
+                    const logsData = await logsRes.json();
+                    const logs = logsData.items || [];
+
+                    const targetLog = logs.find((item) => {
+                        if (item.job_type !== syncWatchState.jobType) return false;
+                        const startedAtMs = item.started_at ? Date.parse(item.started_at) : 0;
+                        return startedAtMs >= syncWatchState.startedAtMs - 10000;
+                    });
+
+                    const currentFingerprint = targetLog
+                        ? [
+                            targetLog.status || "",
+                            targetLog.affected_rows ?? "",
+                            targetLog.message || "",
+                            targetLog.finished_at || "",
+                        ].join("|")
+                        : "";
+                    const hasLogChanged = currentFingerprint !== syncWatchState.lastLogFingerprint;
+                    if (hasLogChanged) {
+                        syncWatchState.lastLogFingerprint = currentFingerprint;
+                    }
+
+                    if (targetLog && targetLog.status === "running") {
+                        // 只有进度变化时才刷新表格，避免无效轮询导致页面抖动
+                        if (hasLogChanged) {
+                            await refresh();
+                        }
+                        const parsed = parseProgress(targetLog.message);
+                        syncProgress.visible = true;
+                        syncProgress.title = parsed ? parsed.title : `${label}进行中`;
+                        syncProgress.detail = parsed ? parsed.detail : (targetLog.message || "正在同步，请稍候...");
+                        syncProgress.percent = parsed ? parsed.percent : Math.min(98, syncWatchState.tick * 2);
+                        syncProgress.status = "warning";
+                        return;
+                    }
+
+                    if (!targetLog) {
+                        return;
+                    }
+
+                    // 任务结束时强制刷新一次，确保最终数据一致
+                    await refresh();
+                    stopSyncWatch();
+                    if (targetLog.status === "success") {
+                        showMessage(`${label}完成，影响 ${targetLog.affected_rows || 0} 条`);
+                    } else {
+                        showMessage(`${label}失败：${targetLog.message || "未知错误"}`, "error");
+                    }
+                } catch (e) {
+                    // 不中断轮询，下一次自动重试
+                    if (syncWatchState.tick % 3 === 0) {
+                        showMessage("同步状态查询异常，正在重试...", "warning");
+                    }
+                }
+            };
+
+            pollOnce();
+            syncWatchState.timerId = setInterval(pollOnce, 5000);
+            syncWatchState.timeoutId = setTimeout(() => {
+                if (syncWatchState.timerId) {
+                    stopSyncWatch();
+                    showMessage(`${label}仍在后台执行，可稍后手动刷新`, "warning");
+                }
+            }, 10 * 60 * 1000);
+        };
+
         const syncPrices = async () => {
             loading.price = true;
             try {
                 await triggerSync({ job_type: "price" });
-                showMessage("股价同步任务已开始（后台执行），约 10s 后可刷新");
-                setTimeout(refresh, 12000);
+                showMessage("股价同步任务已开始，页面将自动刷新进度");
+                startSyncWatch("price", "股价同步");
             } finally {
                 loading.price = false;
             }
@@ -298,7 +436,8 @@ const App = {
             loading.fundamental = true;
             try {
                 await triggerSync({ job_type: "fundamental" });
-                showMessage("分红/利润同步任务已开始，每只股票约耗时 1-3s，请稍后刷新");
+                showMessage("分红/利润同步任务已开始，页面将自动刷新进度");
+                startSyncWatch("fundamental", "分红/利润同步");
             } finally {
                 loading.fundamental = false;
             }
@@ -308,7 +447,8 @@ const App = {
             loading.all = true;
             try {
                 await triggerSync({ job_type: "all" });
-                showMessage("全量同步已开始，请耐心等待并手动刷新");
+                showMessage("一键同步已开始，页面将自动刷新进度");
+                startSyncWatch("all", "一键同步");
             } finally {
                 loading.all = false;
             }
@@ -348,9 +488,11 @@ const App = {
 
             formatNumber,
             formatPercent,
+            formatDate,
             num,
             yieldClass,
             onCellDblClick,
+            syncProgress,
         };
     },
 };

@@ -32,13 +32,13 @@ class Settings(BaseSettings):
     )
 
     # ------------------- Supabase / Postgres -------------------
-    # Supabase 直接给的 Postgres 连接串，形如：
-    # postgres://postgres:<password>@db.<project>.supabase.co:5432/postgres
+    # 保留 Postgres 连接串（用于手工排障或其它工具），应用主链路走 Supabase HTTP API。
     database_url: str = ""
 
-    # 部分场景下 Supabase 还提供 REST API（这里我们直接走 Postgres，不用 REST）
+    # 应用主链路使用 Supabase HTTP API（PostgREST）
     supabase_url: str | None = None
     supabase_anon_key: str | None = None
+    supabase_service_role_key: str | None = None
 
     # ------------------- App -------------------
     app_host: str = "0.0.0.0"
@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     app_debug: bool = False
 
     # 同步任务相关
-    sync_concurrency: int = 5  # 并发抓取股票数据的协程数
+    sync_concurrency: int = 5  # 基本面同步并发；运行时仍会做稳定性上限保护
     sync_request_timeout: int = 15  # 单次请求超时秒数
 
     # 跨域：前端如果独立部署可以配置允许的源
