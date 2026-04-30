@@ -1,0 +1,19 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: a-share-dividends:latest
+    container_name: a-share-dividends
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    # docker compose 会从 compose 文件同目录的 .env 读取所有 key=value
+    # 然后通过 env_file 一次性注入到容器，无需逐个列出
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
