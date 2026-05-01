@@ -224,3 +224,37 @@ def sort_rows_desc_by_estimated_yield(rows: Iterable[dict]) -> list[dict]:
         return (0, -Decimal(str(v)))
 
     return sorted(rows, key=key)
+
+
+def compute_industry_yield_means(contexts: list[CalculationContext]) -> dict[str, Decimal]:
+    """计算每个行业的去年股息率均值（同口径：去年每股分红 / 去年年末价）。
+
+    - 剔除：缺价格 / 价格非正 / 缺分红 / 分红非正 的样本
+    - 行业为空字符串或 None 时，归入 "未分类"
+    - 返回 {industry: mean_yield_decimal}，例如 {"白酒": Decimal("0.032")}
+    """
+    by_industry: dict[str, list[Decimal]] = {}
+
+    for ctx in contexts:
+        industry = (ctx.industry or "").strip() or "未分类"
+        if (
+            ctx.last_year_end_price is None
+            or ctx.last_year_end_price <= 0
+            or ctx.last_year_dividend is None
+            or ctx.last_year_dividend <= 0
+        ):
+            continue
+
+        ratio = ctx.last_year_dividend / ctx.last_year_end_price
+        by_industry.setdefault(industry, []).append(ratio)
+
+    return {
+        industry: sum(ratios, Decimal("0")) / Decimal(len(ratios))
+        for industry, ratios in by_industry.items()
+        if ratios
+    }
+
+
+def industry_key(industry: str | None) -> str:
+    """统一行业归一化逻辑（与 compute_industry_yield_means 保持一致）。"""
+    return (industry or "").strip() or "未分类"

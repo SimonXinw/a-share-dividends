@@ -117,17 +117,257 @@ html, body {
     color: #606266;
 }
 
-.yield_high {
-    color: #f56c6c;
+/* ============================================================================
+ * 股息率配色（A 股传统配色：红涨绿跌）
+ *
+ *   低于达标线 → 绿色阶梯：「跌得越深 → 绿越深」
+ *     l0 (远低于) 深绿 → l3 (接近阈值) 浅绿
+ *
+ *   高于达标线 → 红色阶梯：「涨得越多 → 红越深」
+ *     l1 (刚达标) 浅橙红 → l4 (远超阈值) 深红 + 阴影
+ *
+ *   ≥ 9% 高息陷阱 → 紫红渐变胶囊（独立色系，提示"先查原因"）
+ * ============================================================================ */
+.yield_na {
+    color: #c0c4cc;
+}
+
+.yield_under {
+    font-weight: 500;
+    transition: color 0.2s;
+}
+
+.yield_under_l0 {
+    color: #1b5e20;
+    font-weight: 700;
+}
+
+.yield_under_l1 {
+    color: #2e7d32;
     font-weight: 600;
 }
 
-.yield_mid {
-    color: #e6a23c;
+.yield_under_l2 {
+    color: #43a047;
+}
+
+.yield_under_l3 {
+    color: #81c784;
+}
+
+.yield_over {
+    font-weight: 600;
+    display: inline-block;
+    transition: color 0.2s, background-color 0.2s;
+}
+
+.yield_over_l1 {
+    color: #ff8a65;
+}
+
+.yield_over_l2 {
+    color: #f4511e;
+}
+
+.yield_over_l3 {
+    color: #d32f2f;
+    font-weight: 700;
+}
+
+.yield_over_l4 {
+    color: #b71c1c;
+    font-weight: 800;
+    text-shadow: 0 0 1px rgba(183, 28, 28, 0.4);
+}
+
+.yield_trap {
+    color: #ffffff;
+    font-weight: 800;
+    display: inline-block;
+    background: linear-gradient(135deg, #6f42c1, #c2185b);
+    padding: 2px 8px;
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(111, 66, 193, 0.4);
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.3);
+}
+
+/* ============================================================================
+ * 顶部宏观条：独立面板设计，数据更醒目
+ *   PC (>900px)：整体靠右对齐，与上方操作区、下方操作列视线统一
+ *   平板 (480-900px)：横排居中或靠右自适应
+ *   手机 (<480px)：每个指标一行，上下布局或左右布局
+ * ============================================================================ */
+.macro_bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 32px;
+    padding: 16px 24px;
+    margin-bottom: 20px;
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.04);
+    border: 1px solid #ebeef5;
+}
+
+.macro_main {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 40px;
+    flex-wrap: wrap;
+}
+
+.macro_bar .metric {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.macro_bar .label {
+    font-size: 13px;
+    color: #606266;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+}
+
+.macro_bar .sub_label {
+    font-size: 11px;
+    color: #909399;
+    margin-left: 4px;
+}
+
+.macro_bar .value {
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.macro_value_blue {
+    color: #409eff;
+    text-shadow: 0 1px 2px rgba(64, 158, 255, 0.2);
+}
+
+.macro_value_red {
+    color: #d32f2f;
+    text-shadow: 0 1px 2px rgba(211, 47, 47, 0.2);
+}
+
+.macro_value_purple {
+    color: #8e24aa;
+    text-shadow: 0 1px 2px rgba(142, 36, 170, 0.2);
+}
+
+.macro_actions {
+    flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+    .macro_bar {
+        padding: 16px 20px;
+        gap: 24px;
+    }
+    .macro_main {
+        gap: 24px;
+    }
+    .macro_bar .value {
+        font-size: 20px;
+    }
+    .macro_bar .label {
+        font-size: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    .macro_bar {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 16px;
+        gap: 16px;
+    }
+    .macro_main {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+    .macro_bar .metric {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 12px;
+        border-bottom: 1px dashed #ebeef5;
+    }
+    .macro_bar .metric:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+    }
+    .macro_bar .label {
+        margin-bottom: 0;
+        font-size: 13px;
+    }
+    .macro_bar .value {
+        font-size: 18px;
+    }
+    .macro_actions {
+        margin-top: 4px;
+    }
+    .macro_actions .el-button {
+        width: 100%;
+    }
+}
+
+/* ============================================================================
+ * 单元格内的辅助标识：趋势箭头 / 行业差
+ * ============================================================================ */
+.cell_with_meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    line-height: 1.3;
+}
+
+.trend_arrow {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 0 2px;
+}
+
+/* A 股配色：上升 = 红，下降 = 绿（K 线惯例） */
+.trend_up {
+    color: #d32f2f;
+}
+
+.trend_down {
+    color: #2e7d32;
+}
+
+.trend_flat {
+    color: #909399;
+    font-weight: 400;
+}
+
+.vs_industry {
+    font-size: 11px;
+    color: #909399;
+    font-weight: 400;
+    cursor: help;
+}
+
+/* 高于行业均值 = 强 = 红；低于 = 弱 = 绿 */
+.vs_industry_high {
+    color: #d32f2f;
     font-weight: 600;
 }
 
-.yield_low {
+.vs_industry_low {
+    color: #2e7d32;
+    font-weight: 600;
+}
+
+.vs_industry_flat {
     color: #909399;
 }
 

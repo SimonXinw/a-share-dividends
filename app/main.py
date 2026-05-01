@@ -9,12 +9,12 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import database
 from .config import settings
-from .routers import stocks, sync
+from .routers import macro, stocks, sync
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,6 +84,7 @@ app.router.default_response_class = DecimalJSONResponse
 # ============================================================================
 app.include_router(stocks.router)
 app.include_router(sync.router)
+app.include_router(macro.router)
 
 
 @app.get("/api/health")
@@ -98,9 +99,20 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-@app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+def _static_version(filename: str) -> str:
+    """用文件 mtime 作为版本号，文件改了 URL 自动变，浏览器自动拉新版。"""
+    try:
+        return str(int((STATIC_DIR / filename).stat().st_mtime))
+    except OSError:
+        return "0"
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index() -> HTMLResponse:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    html = html.replace("__CSS_VERSION__", _static_version("style.css"))
+    html = html.replace("__JS_VERSION__", _static_version("app.js"))
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
 
 
 if __name__ == "__main__":

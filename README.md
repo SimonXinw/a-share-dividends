@@ -267,3 +267,5 @@ A：① 在 `sql/init.sql` 加列 → ② 在 `schemas.py` / `calculator.py` 的
 ## 9. License
 
 仅供个人学习/自用，数据归原数据源所有。
+
+xw 牛逼

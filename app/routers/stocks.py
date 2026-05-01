@@ -8,20 +8,38 @@ from fastapi import APIRouter, HTTPException
 
 from .. import database
 from ..schemas import StockAddPayload, StockOverridePayload
-from ..services import calculator
+from ..services import calculator, macro
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
 
 
+def _attach_industry_avg(row: dict, industry: str | None, means: dict) -> dict:
+    key = calculator.industry_key(industry)
+    row["industry_avg_yield"] = means.get(key)
+    return row
+
+
 @router.get("")
 async def list_stocks() -> dict:
     """返回表格数据，已按今年预估股息率降序排列。"""
     contexts = await calculator.load_all_contexts()
-    rows = [calculator.context_to_row(c) for c in contexts]
+    industry_means = calculator.compute_industry_yield_means(contexts)
+    risk_free_rate = await macro.get_risk_free_rate()
+
+    rows = [
+        _attach_industry_avg(calculator.context_to_row(c), c.industry, industry_means)
+        for c in contexts
+    ]
     rows = calculator.sort_rows_desc_by_estimated_yield(rows)
-    return {"items": rows, "total": len(rows)}
+
+    return {
+        "items": rows,
+        "total": len(rows),
+        "industry_yield_means": industry_means,
+        "risk_free_rate": risk_free_rate,
+    }
 
 
 @router.post("")
@@ -50,23 +68,37 @@ async def upsert_override(code: str, payload: StockOverridePayload) -> dict:
     if not exists:
         raise HTTPException(404, f"股票 {code} 不存在或未启用")
 
-    await database.upsert_override(
-        code,
-        {
-            "price": payload.price,
-            "last_year_dividend": payload.last_year_dividend,
-            "last_year_net_profit": payload.last_year_net_profit,
-            "this_year_estimated_profit": payload.this_year_estimated_profit,
-            "note": payload.note,
-        },
-    )
+    try:
+        await database.upsert_override(
+            code,
+            {
+                "price": payload.price,
+                "last_year_dividend": payload.last_year_dividend,
+                "last_year_net_profit": payload.last_year_net_profit,
+                "this_year_estimated_profit": payload.this_year_estimated_profit,
+                "note": payload.note,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("[%s] upsert_override 写库失败，payload=%s", code, payload.model_dump())
+        raise HTTPException(500, f"保存覆盖值失败：{exc}") from exc
 
-    contexts = await calculator.load_all_contexts()
-    matched = next((c for c in contexts if c.code == code), None)
-    if not matched:
-        raise HTTPException(404, "股票上下文加载失败")
+    try:
+        contexts = await calculator.load_all_contexts()
+        matched = next((c for c in contexts if c.code == code), None)
+        if not matched:
+            raise HTTPException(404, "股票上下文加载失败")
 
-    return {"ok": True, "row": calculator.context_to_row(matched)}
+        industry_means = calculator.compute_industry_yield_means(contexts)
+        row = _attach_industry_avg(
+            calculator.context_to_row(matched), matched.industry, industry_means
+        )
+        return {"ok": True, "row": row}
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("[%s] upsert_override 重算失败", code)
+        raise HTTPException(500, f"覆盖已保存，但重算失败：{exc}") from exc
 
 
 @router.delete("/{code}/override")
@@ -75,7 +107,12 @@ async def clear_override(code: str) -> dict:
     await database.delete_override(code)
     contexts = await calculator.load_all_contexts()
     matched = next((c for c in contexts if c.code == code), None)
-    return {"ok": True, "row": calculator.context_to_row(matched) if matched else None}
+    if not matched:
+        return {"ok": True, "row": None}
+
+    industry_means = calculator.compute_industry_yield_means(contexts)
+    row = _attach_industry_avg(calculator.context_to_row(matched), matched.industry, industry_means)
+    return {"ok": True, "row": row}
 
 
 def _guess_market(code: str) -> str:

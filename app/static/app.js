@@ -137,10 +137,44 @@ const App = {
             status: "success",
         });
 
+        // 阈值依据：达标线 = 中国 10 年期国债收益率 + 3% 股权风险溢价；
+        //          警示线（高息陷阱）固定 9%，与基准利率无关。
+        const EQUITY_RISK_PREMIUM = 0.03;
+        const TRAP_THRESHOLD = 0.09;
+        const DEFAULT_THRESHOLD = 0.05;
+
+        const baseline = reactive({
+            riskFreeRate: null,
+            threshold: DEFAULT_THRESHOLD,
+            industryMeans: {},
+            refreshing: false,
+        });
+
+        const thresholdLabel = computed(() => formatPercent(baseline.threshold));
+        const riskFreeLabel = computed(() => formatPercent(baseline.riskFreeRate));
+
         const showMessage = (msg, type = "success") => {
             message.value = msg;
             messageType.value = type;
             ElMessage({ message: msg, type, duration: 3000 });
+        };
+
+        const applyMacro = (data) => {
+            const rfr = Number(data.risk_free_rate);
+            baseline.riskFreeRate = Number.isFinite(rfr) && rfr > 0 ? rfr : null;
+            baseline.threshold = baseline.riskFreeRate
+                ? baseline.riskFreeRate + EQUITY_RISK_PREMIUM
+                : DEFAULT_THRESHOLD;
+
+            const means = data.industry_yield_means || {};
+            const normalized = {};
+            for (const [industry, value] of Object.entries(means)) {
+                const n = Number(value);
+                if (Number.isFinite(n)) {
+                    normalized[industry] = n;
+                }
+            }
+            baseline.industryMeans = normalized;
         };
 
         const refresh = async () => {
@@ -148,15 +182,35 @@ const App = {
             try {
                 const res = await fetch(`${API_BASE}/api/stocks`);
                 const data = await res.json();
-                rows.value = (data.items || []).slice();
+                applyMacro(data);
 
-                // 前端渲染时做一次兜底重算，再按“今年预估股息率”降序排序。
+                rows.value = (data.items || []).slice();
                 rows.value.forEach((row) => recomputeRow(row));
                 sortByEstimatedYieldDesc();
             } catch (e) {
                 showMessage("加载列表失败：" + e.message, "error");
             } finally {
                 loading.list = false;
+            }
+        };
+
+        const refreshRiskFreeRate = async () => {
+            baseline.refreshing = true;
+            try {
+                const res = await fetch(`${API_BASE}/api/macro/refresh`, { method: "POST" });
+                const data = await res.json();
+                const rfr = Number(data.risk_free_rate);
+                if (Number.isFinite(rfr) && rfr > 0) {
+                    baseline.riskFreeRate = rfr;
+                    baseline.threshold = rfr + EQUITY_RISK_PREMIUM;
+                    showMessage(`已更新国债基准利率：${(rfr * 100).toFixed(2)}%`);
+                } else {
+                    showMessage("拉取国债收益率失败，已沿用旧值", "warning");
+                }
+            } catch (e) {
+                showMessage("刷新国债收益率失败：" + e.message, "error");
+            } finally {
+                baseline.refreshing = false;
             }
         };
 
@@ -199,6 +253,31 @@ const App = {
             });
         };
 
+        const recomputeIndustryMeans = () => {
+            const groups = {};
+            for (const row of rows.value) {
+                const industry = (row.industry || "").trim() || "未分类";
+                const y = Number(row.last_year_dividend_yield);
+                if (!Number.isFinite(y) || y <= 0) continue;
+
+                if (!groups[industry]) groups[industry] = [];
+                groups[industry].push(y);
+            }
+
+            const means = {};
+            for (const [industry, list] of Object.entries(groups)) {
+                if (list.length === 0) continue;
+                const sum = list.reduce((a, b) => a + b, 0);
+                means[industry] = sum / list.length;
+            }
+            baseline.industryMeans = means;
+
+            for (const row of rows.value) {
+                const industry = (row.industry || "").trim() || "未分类";
+                row.industry_avg_yield = means[industry] ?? null;
+            }
+        };
+
         const saveOverride = async ({ code, field, value }) => {
             const row = rows.value.find((r) => r.code === code);
             if (!row) return;
@@ -222,12 +301,21 @@ const App = {
                     body: JSON.stringify(payload),
                 });
                 if (!res.ok) {
-                    throw new Error(await res.text());
+                    const text = await res.text();
+                    let detail = text;
+                    try {
+                        const json = JSON.parse(text);
+                        detail = json.detail || text;
+                    } catch (_) {
+                        // text 不是 JSON，原样使用
+                    }
+                    throw new Error(`HTTP ${res.status}：${detail}`);
                 }
                 const data = await res.json();
                 if (data.row) {
                     Object.assign(row, data.row);
                 }
+                recomputeIndustryMeans();
                 showMessage(`已保存 ${row.name || code} 的 ${field}`);
             } catch (e) {
                 row[field] = oldVal;
@@ -454,12 +542,92 @@ const App = {
             }
         };
 
+        // 阈值依据（动态，取自实时国债收益率 + 3% 股权风险溢价）：
+        //   达标线 = baseline.threshold（拉取失败时回退到 5%）
+        //   警示线 9% = A 股极端高息几乎都对应业绩暴雷 / 一次性特别分红 / 数据未除权
+        // 颜色把 [0, threshold) 等分 4 档（冷色越接近阈值越深），
+        //       [threshold, trap) 等分 4 档（暖色越远离阈值越显眼）。
         const yieldClass = (v) => {
             const n = Number(v);
-            if (!Number.isFinite(n)) return "yield_low";
-            if (n >= 0.05) return "yield_high";
-            if (n >= 0.03) return "yield_mid";
-            return "yield_low";
+            if (!Number.isFinite(n)) return "yield_na";
+
+            const pct = n * 100;
+            const threshold = (baseline.threshold || DEFAULT_THRESHOLD) * 100;
+            const trapLine = TRAP_THRESHOLD * 100;
+
+            if (pct >= trapLine) return "yield_trap";
+
+            if (pct < threshold) {
+                const step = threshold / 4;
+                if (pct < step) return "yield_under yield_under_l0";
+                if (pct < step * 2) return "yield_under yield_under_l1";
+                if (pct < step * 3) return "yield_under yield_under_l2";
+                return "yield_under yield_under_l3";
+            }
+
+            const span = trapLine - threshold;
+            const step = span > 0 ? span / 4 : 1;
+            if (pct < threshold + step) return "yield_over yield_over_l1";
+            if (pct < threshold + step * 2) return "yield_over yield_over_l2";
+            if (pct < threshold + step * 3) return "yield_over yield_over_l3";
+            return "yield_over yield_over_l4";
+        };
+
+        // ============================================================
+        // 趋势：今年预估股息率 vs 去年股息率
+        // ============================================================
+        const trendDiff = (row) => {
+            const last = Number(row.last_year_dividend_yield);
+            const cur = Number(row.this_year_estimated_yield);
+            if (!Number.isFinite(last) || !Number.isFinite(cur)) return null;
+            return cur - last;
+        };
+
+        const trendClass = (row) => {
+            const d = trendDiff(row);
+            if (d === null) return "";
+            // 仅在差距 < 0.005%（小到四舍五入也几乎为 0）时才视为持平；
+            // 其它任何差距都给出方向性箭头，避免"明明有变化却显示 ─"的误导。
+            if (Math.abs(d) < 0.00005) return "trend_arrow trend_flat";
+            return d > 0 ? "trend_arrow trend_up" : "trend_arrow trend_down";
+        };
+
+        const trendLabel = (row) => {
+            const d = trendDiff(row);
+            if (d === null) return "";
+            if (Math.abs(d) < 0.00005) return "─";
+            const arrow = d > 0 ? "↑" : "↓";
+            return `${arrow} ${(Math.abs(d) * 100).toFixed(2)}%`;
+        };
+
+        // ============================================================
+        // 行业差：去年股息率 vs 行业均值
+        // ============================================================
+        const industryDiff = (row) => {
+            const cur = Number(row.last_year_dividend_yield);
+            const avg = Number(row.industry_avg_yield);
+            if (!Number.isFinite(cur) || !Number.isFinite(avg) || avg <= 0) return null;
+            return cur - avg;
+        };
+
+        const industryDiffClass = (row) => {
+            const d = industryDiff(row);
+            if (d === null) return "";
+            if (Math.abs(d) < 0.00005) return "vs_industry vs_industry_flat";
+            return d > 0 ? "vs_industry vs_industry_high" : "vs_industry vs_industry_low";
+        };
+
+        const industryDiffLabel = (row) => {
+            const d = industryDiff(row);
+            if (d === null) return "";
+            const sign = d > 0 ? "+" : d < 0 ? "" : "±";
+            return `行业 ${sign}${(d * 100).toFixed(2)}%`;
+        };
+
+        const industryAvgLabel = (row) => {
+            const avg = Number(row.industry_avg_yield);
+            if (!Number.isFinite(avg) || avg <= 0) return "";
+            return `行业均值 ${(avg * 100).toFixed(2)}%`;
         };
 
         const onCellDblClick = () => {
@@ -485,14 +653,23 @@ const App = {
             syncPrices,
             syncFundamentals,
             syncAll,
+            refreshRiskFreeRate,
 
             formatNumber,
             formatPercent,
             formatDate,
             num,
             yieldClass,
+            trendClass,
+            trendLabel,
+            industryDiffClass,
+            industryDiffLabel,
+            industryAvgLabel,
             onCellDblClick,
             syncProgress,
+            baseline,
+            thresholdLabel,
+            riskFreeLabel,
         };
     },
 };
