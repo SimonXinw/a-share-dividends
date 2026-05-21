@@ -132,31 +132,13 @@ def _same_day(value: str | None, target: date) -> bool:
             return False
 
 
-def _to_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
 async def list_price_sync_candidates(today: date) -> list[str]:
     rows = await list_dashboard_rows()
     candidates: list[str] = []
     for row in rows:
-        price = row.get("price")
-        current_market_cap = row.get("current_market_cap")
-        last_year_end_market_cap = row.get("last_year_end_market_cap")
-        last_year_end_price = row.get("last_year_end_price")
-        price_sync_date = row.get("price_sync_date") or row.get("price_date")
-        has_price_bundle = (
-            price is not None
-            and current_market_cap is not None
-            and last_year_end_market_cap is not None
-            and last_year_end_price is not None
-        )
-        if has_price_bundle and _same_day(price_sync_date, today):
+        # 只按“是否最新日期”判断跳过：
+        # 最新（今天）就跳过；不是最新就拉取。
+        if _same_day(row.get("price_sync_date"), today):
             continue
         candidates.append(row["code"])
     return candidates
@@ -166,16 +148,9 @@ async def list_fundamental_sync_candidates(today: date) -> list[str]:
     rows = await list_dashboard_rows()
     candidates: list[str] = []
     for row in rows:
-        dividend_value = _to_float(row.get("last_year_dividend"))
-        net_profit_value = _to_float(row.get("last_year_net_profit"))
-        # 分红为 0 或空值都视为“未就绪”，避免错误数据被跳过。
-        has_fundamental = (
-            dividend_value is not None
-            and dividend_value > 0
-            and net_profit_value is not None
-            and net_profit_value != 0
-        )
-        if has_fundamental and _same_day(row.get("fundamental_sync_date"), today):
+        # 只按“是否最新日期”判断跳过：
+        # 最新（今天）就跳过；不是最新就拉取。
+        if _same_day(row.get("fundamental_sync_date"), today):
             continue
         candidates.append(row["code"])
     return candidates
@@ -255,6 +230,29 @@ async def upsert_override(code: str, payload: dict[str, Any]) -> None:
 async def delete_override(code: str) -> None:
     client = _ensure_client()
     await _run_supabase(lambda: client.table("a_share_overrides").delete().eq("code", code).execute())
+
+
+async def clear_stock_synced_data(code: str) -> None:
+    """清除单只股票的同步原始数据（不删除股票，不清理 override）。"""
+    client = _ensure_client()
+
+    await _run_supabase(lambda: client.table("a_share_prices").delete().eq("code", code).execute())
+    await _run_supabase(lambda: client.table("a_share_dividends").delete().eq("code", code).execute())
+    await _run_supabase(lambda: client.table("a_share_quarterly_profits").delete().eq("code", code).execute())
+    await _run_supabase(
+        lambda: client.table("a_share_stocks")
+        .update({"price_sync_date": None, "fundamental_sync_date": None})
+        .eq("code", code)
+        .execute()
+    )
+
+
+async def clear_stock_synced_data_batch(codes: list[str]) -> int:
+    cleared = 0
+    for code in codes:
+        await clear_stock_synced_data(code)
+        cleared += 1
+    return cleared
 
 
 async def create_sync_log(job_type: str, started_at: datetime) -> int | None:
@@ -365,17 +363,6 @@ async def upsert_price(code: str, price: Decimal) -> None:
         )
         .execute()
     )
-    try:
-        await _run_supabase(
-            lambda: client.table("a_share_stocks")
-            .update({"price_sync_date": today_iso})
-            .eq("code", code)
-            .execute()
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("price_sync_date 更新跳过（可能尚未执行迁移）: %s", exc)
-
-
 async def upsert_price_with_market_values(
     code: str,
     price: Decimal,
@@ -419,6 +406,11 @@ async def upsert_price_with_market_values(
             )
             .execute()
         )
+
+
+async def mark_price_synced(code: str) -> None:
+    client = _ensure_client()
+    today_iso = datetime.now(timezone.utc).date().isoformat()
     try:
         await _run_supabase(
             lambda: client.table("a_share_stocks")

@@ -96,7 +96,6 @@ async def _sync_prices_fallback_by_daily(
     async def handle(code: str) -> None:
         nonlocal affected, failed, processed
         symbol = f"{_market_prefix(code).lower()}{code}"
-        success = False
 
         df = None
         for attempt in range(1, 4):
@@ -197,6 +196,30 @@ async def _sync_prices_fallback_by_daily(
             if year_last_date is not None:
                 last_year_end_date = str(year_last_date)[:10]
 
+        # 仅当一整条价格数据都完整时才落库并标记同步日期。
+        if (
+            current_market_cap is None
+            or last_year_end_price is None
+            or last_year_end_market_cap is None
+            or last_year_end_date is None
+        ):
+            logger.warning("[%s] 价格数据不完整，跳过落库", code)
+            async with lock:
+                processed += 1
+                failed += 1
+                if progress_cb is not None:
+                    await progress_cb(
+                        {
+                            "stage": "price",
+                            "processed": processed,
+                            "total": total,
+                            "success": affected,
+                            "failed": failed,
+                            "code": code,
+                        }
+                    )
+            return
+
         await database.upsert_price_with_market_values(
             code=code,
             price=price,
@@ -205,12 +228,10 @@ async def _sync_prices_fallback_by_daily(
             last_year_end_market_cap=last_year_end_market_cap,
             last_year_end_date=last_year_end_date,
         )
-        success = True
+        await database.mark_price_synced(code)
         async with lock:
             processed += 1
             affected += 1
-            if not success:
-                failed += 1
             if progress_cb is not None:
                 await progress_cb(
                     {
@@ -399,68 +420,111 @@ async def sync_dividends_and_profits(
             divs = await _fetch_dividends_one(code)
             profits = await _fetch_quarterly_profits_one(code)
 
-        async with lock:
-            # 写入年度分红
-            for d in divs:
-                # 如果同年有利润数据，可以推算 net_profit / payout_ratio
-                year = d["year"]
-                # 当年净利润 = 4 个季度之和（如果都有）
-                full_year_profit = None
-                q_in_year = [p for p in profits if p["year"] == year]
-                if len(q_in_year) == 4:
-                    full_year_profit = sum((p["net_profit"] for p in q_in_year), Decimal("0"))
+        if not divs or not profits:
+            logger.warning("[%s] 基本面数据不完整（分红 %d 条，季度利润 %d 条），跳过落库", code, len(divs), len(profits))
+            async with lock:
+                processed += 1
+                failed += 1
+                if progress_cb is not None:
+                    await progress_cb(
+                        {
+                            "stage": "fundamental",
+                            "processed": processed,
+                            "total": total,
+                            "success": affected,
+                            "failed": failed,
+                            "code": code,
+                        }
+                    )
+            return
 
-                payout_ratio = None
-                if full_year_profit and full_year_profit != 0:
-                    # 假设总股本未知，无法得到分红总额；这里用 payout_ratio 字段保存
-                    # 「每股分红 / 每股净利润」也成立，因股本相同，约掉。
-                    # 取近似：payout_ratio ~ dividend_per_share / (full_year_profit / shares)
-                    # 由于没股本，留空，前端不强依赖此字段。
-                    payout_ratio = None
+        dividend_by_year = {d["year"]: d["dividend_per_share"] for d in divs}
+        yearly_profit_sum: dict[int, Decimal] = {}
+        yearly_profit_count: dict[int, int] = {}
+        for p in profits:
+            year = p["year"]
+            yearly_profit_sum[year] = yearly_profit_sum.get(year, Decimal("0")) + p["net_profit"]
+            yearly_profit_count[year] = yearly_profit_count.get(year, 0) + 1
 
-                await database.upsert_dividend_row(
-                    code=code,
-                    year=year,
-                    dividend_per_share=d["dividend_per_share"],
-                    net_profit=full_year_profit,
-                    payout_ratio=payout_ratio,
-                )
+        full_year_profit_by_year = {
+            year: yearly_profit_sum[year]
+            for year, count in yearly_profit_count.items()
+            if count == 4
+        }
 
-            # 单独再写一遍年度利润（即使无分红记录）
-            by_year: dict[int, Decimal] = {}
-            by_year_count: dict[int, int] = {}
-            for p in profits:
-                by_year[p["year"]] = by_year.get(p["year"], Decimal("0")) + p["net_profit"]
-                by_year_count[p["year"]] = by_year_count.get(p["year"], 0) + 1
-            for y, v in by_year.items():
-                if by_year_count.get(y) == 4:
-                    await database.upsert_dividend_profit_only(code, y, v)
+        latest_dividend_year = max(dividend_by_year.keys())
+        if latest_dividend_year not in full_year_profit_by_year:
+            logger.warning("[%s] 最新分红年度 %d 缺少完整 4 季净利润，跳过落库", code, latest_dividend_year)
+            async with lock:
+                processed += 1
+                failed += 1
+                if progress_cb is not None:
+                    await progress_cb(
+                        {
+                            "stage": "fundamental",
+                            "processed": processed,
+                            "total": total,
+                            "success": affected,
+                            "failed": failed,
+                            "code": code,
+                        }
+                    )
+            return
 
-            # 写入季度利润
-            for p in profits:
-                await database.upsert_quarterly_profit(
-                    code=code,
-                    year=p["year"],
-                    quarter=p["quarter"],
-                    net_profit=p["net_profit"],
-                )
+        try:
+            async with lock:
+                # 先算完整，再统一写入；仅全部成功后才标记 fundamental_sync_date。
+                for year, dividend_per_share in sorted(dividend_by_year.items()):
+                    await database.upsert_dividend_row(
+                        code=code,
+                        year=year,
+                        dividend_per_share=dividend_per_share,
+                        net_profit=full_year_profit_by_year.get(year),
+                        payout_ratio=None,
+                    )
 
-            await database.mark_fundamental_synced(code)
-            processed += 1
-            affected += 1
-            # fundamentals 允许部分数据为空，只要流程完成即视为成功
-            if progress_cb is not None:
-                await progress_cb(
-                    {
-                        "stage": "fundamental",
-                        "processed": processed,
-                        "total": total,
-                        "success": affected,
-                        "failed": failed,
-                        "code": code,
-                    }
-                )
+                for year, net_profit in sorted(full_year_profit_by_year.items()):
+                    await database.upsert_dividend_profit_only(code, year, net_profit)
+
+                for p in profits:
+                    await database.upsert_quarterly_profit(
+                        code=code,
+                        year=p["year"],
+                        quarter=p["quarter"],
+                        net_profit=p["net_profit"],
+                    )
+
+                await database.mark_fundamental_synced(code)
+                processed += 1
+                affected += 1
+                if progress_cb is not None:
+                    await progress_cb(
+                        {
+                            "stage": "fundamental",
+                            "processed": processed,
+                            "total": total,
+                            "success": affected,
+                            "failed": failed,
+                            "code": code,
+                        }
+                    )
             logger.info("[%s] 已同步：分红 %d 条，季度利润 %d 条", code, len(divs), len(profits))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[%s] 基本面落库失败：%s", code, exc)
+            async with lock:
+                processed += 1
+                failed += 1
+                if progress_cb is not None:
+                    await progress_cb(
+                        {
+                            "stage": "fundamental",
+                            "processed": processed,
+                            "total": total,
+                            "success": affected,
+                            "failed": failed,
+                            "code": code,
+                        }
+                    )
 
     await asyncio.gather(*(handle(c) for c in codes), return_exceptions=False)
 

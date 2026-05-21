@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from .. import database
-from ..schemas import StockAddPayload, StockOverridePayload
+from ..schemas import StockAddPayload, StockBatchClearPayload, StockOverridePayload
 from ..services import calculator, macro
 
 logger = logging.getLogger(__name__)
@@ -113,6 +113,40 @@ async def clear_override(code: str) -> dict:
     industry_means = calculator.compute_industry_yield_means(contexts)
     row = _attach_industry_avg(calculator.context_to_row(matched), matched.industry, industry_means)
     return {"ok": True, "row": row}
+
+
+@router.delete("/{code}/synced-data")
+async def clear_synced_data(code: str) -> dict:
+    """清除单只股票的同步原始数据（不删除股票）。"""
+    exists = await database.stock_exists_active(code)
+    if not exists:
+        raise HTTPException(404, f"股票 {code} 不存在或未启用")
+
+    await database.clear_stock_synced_data(code)
+    contexts = await calculator.load_all_contexts()
+    matched = next((c for c in contexts if c.code == code), None)
+    if not matched:
+        return {"ok": True, "row": None}
+
+    industry_means = calculator.compute_industry_yield_means(contexts)
+    row = _attach_industry_avg(calculator.context_to_row(matched), matched.industry, industry_means)
+    return {"ok": True, "row": row}
+
+
+@router.post("/synced-data/clear")
+async def clear_synced_data_batch(payload: StockBatchClearPayload) -> dict:
+    """批量清除同步原始数据（不删除股票）。"""
+    clean_codes = [code.strip().zfill(6) for code in payload.codes if code and code.strip()]
+    if not clean_codes:
+        raise HTTPException(400, "codes 不能为空")
+
+    active_codes = set(await database.list_active_codes())
+    target_codes = [code for code in clean_codes if code in active_codes]
+    if not target_codes:
+        raise HTTPException(404, "未找到可清除的启用股票")
+
+    cleared = await database.clear_stock_synced_data_batch(target_codes)
+    return {"ok": True, "cleared": cleared, "codes": target_codes}
 
 
 def _guess_market(code: str) -> str:

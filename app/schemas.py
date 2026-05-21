@@ -78,3 +78,7 @@ class StockAddPayload(BaseModel):
     name: Optional[str] = None
     industry: Optional[str] = None
     market: Optional[str] = None
+
+
+class StockBatchClearPayload(BaseModel):
+    codes: list[str] = Field(..., min_length=1, description="要清除同步数据的股票代码列表")

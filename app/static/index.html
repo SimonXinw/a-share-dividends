@@ -27,6 +27,14 @@
               clearable
             ></el-input>
             <el-button type="primary" @click="addStock">添加</el-button>
+            <el-button
+              type="danger"
+              plain
+              @click="clearSelectedSyncedData"
+              :loading="loading.clearData"
+              :disabled="selectedRows.length === 0"
+              >批量清除数据（{{ selectedRows.length }}）</el-button
+            >
             <el-divider
               direction="vertical"
               class="actions_divider"
@@ -117,9 +125,11 @@
               style="width: max-content; min-width: 100%"
               :default-sort="{ prop: 'this_year_estimated_yield', order: 'descending' }"
               @cell-dblclick="onCellDblClick"
+              @selection-change="onSelectionChange"
               v-loading="loading.list"
               empty-text="暂无数据，先点右上角『一键同步全部』"
             >
+              <el-table-column type="selection" width="44" fixed="left"></el-table-column>
               <el-table-column
                 prop="name"
                 label="股名"
@@ -345,7 +355,7 @@
 
               <el-table-column
                 label="操作"
-                width="160"
+                width="250"
                 fixed="right"
                 header-cell-class-name="readonly_col_header"
               >
@@ -356,6 +366,13 @@
                     type="warning"
                     plain
                     >恢复原值</el-button
+                  >
+                  <el-button
+                    size="small"
+                    @click="clearSyncedData(row)"
+                    type="danger"
+                    plain
+                    >清除数据</el-button
                   >
                   <el-button
                     size="small"

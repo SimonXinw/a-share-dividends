@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import webbrowser
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
@@ -25,9 +26,25 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
+def _build_page_view_url(host: str, port: int) -> str:
+    """把 0.0.0.0 映射为本机可打开的 localhost。"""
+    if host in {"0.0.0.0", "::"}:
+        host = "127.0.0.1"
+    return f"http://{host}:{port}"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await database.init_pool()
+    page_view_url = _build_page_view_url(settings.app_host, settings.app_port)
+    logger.info("page view: on %s", page_view_url)
+
+    if settings.app_auto_open_browser:
+        try:
+            webbrowser.open(page_view_url, new=2, autoraise=True)
+            logger.info("已尝试自动打开页面")
+        except Exception as exc:
+            logger.warning("自动打开页面失败：%s", exc)
     try:
         yield
     finally:

@@ -12,6 +12,7 @@
 - **任意单元格双击编辑**：编辑后立即重新计算「股息率」「预估每股分红」「预估股息率」并保存
 - 编辑保存到 `a_share_overrides` 表，**不污染**原始抓取数据；点"恢复原值"可清除覆盖
 - **一键同步**当前股价 / 分红明细 / 季度净利润
+- 支持单行与多选**清除同步数据**（仅清空抓取数据，保留股票，不影响覆盖编辑）
 - 支持新增/移除关注股票
 
 ### 今年预估股息率的计算规则
@@ -238,6 +239,8 @@ docker run -d --name a-share-dividends \
 | DELETE | `/api/stocks/{code}` | 软删除（is_active=false） |
 | PUT | `/api/stocks/{code}/override` | 保存编辑后的字段 |
 | DELETE | `/api/stocks/{code}/override` | 清除编辑覆盖，恢复原值 |
+| DELETE | `/api/stocks/{code}/synced-data` | 清除该股票的同步原始数据（不删股票） |
+| POST | `/api/stocks/synced-data/clear` | 批量清除同步原始数据（`{"codes":["600519","601318"]}`） |
 | POST | `/api/sync` | 后台触发同步：`{"job_type":"price\|fundamental\|all","codes":["600519"]}` |
 | POST | `/api/sync/blocking` | 阻塞同步（一次性脚本用） |
 | GET | `/api/sync/logs?limit=20` | 同步日志 |
@@ -261,6 +264,13 @@ A：可以。把 `app/services/data_source.py` 替换为对应实现即可，其
 
 **Q5：怎么扩展新增字段？**  
 A：① 在 `sql/init.sql` 加列 → ② 在 `schemas.py` / `calculator.py` 的 `CalculationContext` 加字段 → ③ 在 `static/index.html` 加 column。
+
+**Q6：点击同步时，如何跳过，如何避免“半新半旧”数据？**  
+A：当前规则是：
+
+- **跳过只看是否最新日期**：`price_sync_date` / `fundamental_sync_date` 是今天就跳过，不是今天就拉取。
+- **先算完整再落库**：单只股票的数据先在内存算完，再统一写库；只有整只股票写入成功才会更新对应 `*_sync_date`。
+- **未完整不标记最新**：如果抓取结果不完整（例如缺关键字段、最新分红年度缺完整 4 季利润），会跳过落库并记失败，下一次点击同步会继续重试，不会被“今天已同步”误跳过。
 
 ---
 

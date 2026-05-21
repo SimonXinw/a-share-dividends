@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     app_debug: bool = False
+    app_auto_open_browser: bool = True
 
     # 同步任务相关
     sync_concurrency: int = 5  # 基本面同步并发；运行时仍会做稳定性上限保护

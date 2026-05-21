@@ -117,7 +117,8 @@ const App = {
     components: { EditableCell },
     setup() {
         const rows = ref([]);
-        const loading = reactive({ list: false, price: false, fundamental: false, all: false });
+        const selectedRows = ref([]);
+        const loading = reactive({ list: false, price: false, fundamental: false, all: false, clearData: false });
         const message = ref("");
         const messageType = ref("success");
         const newStockCode = ref("");
@@ -389,6 +390,86 @@ const App = {
             }
         };
 
+        const onSelectionChange = (selection) => {
+            selectedRows.value = selection || [];
+        };
+
+        const clearSyncedData = async (row) => {
+            try {
+                await ElMessageBox.confirm(
+                    `清除 ${row.name || row.code} 的同步数据（价格/分红/季度利润）？股票不会被移除。`,
+                    "确认清除数据",
+                    { type: "warning" }
+                );
+            } catch {
+                return;
+            }
+
+            loading.clearData = true;
+            try {
+                const res = await fetch(`${API_BASE}/api/stocks/${row.code}/synced-data`, {
+                    method: "DELETE",
+                });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+
+                const data = await res.json();
+                if (data.row) {
+                    Object.assign(row, data.row);
+                    recomputeRow(row);
+                } else {
+                    await refresh();
+                }
+                showMessage(`${row.name || row.code} 的同步数据已清除，可重新同步`);
+            } catch (e) {
+                showMessage("清除数据失败：" + e.message, "error");
+            } finally {
+                loading.clearData = false;
+            }
+        };
+
+        const clearSelectedSyncedData = async () => {
+            const codes = Array.from(new Set(selectedRows.value.map((row) => row.code).filter(Boolean)));
+            if (codes.length === 0) {
+                showMessage("请先选择要清除数据的股票", "warning");
+                return;
+            }
+
+            try {
+                await ElMessageBox.confirm(
+                    `确认批量清除 ${codes.length} 只股票的同步数据？股票不会被移除。`,
+                    "确认批量清除",
+                    { type: "warning" }
+                );
+            } catch {
+                return;
+            }
+
+            loading.clearData = true;
+            try {
+                const res = await fetch(`${API_BASE}/api/stocks/synced-data/clear`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ codes }),
+                });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+
+                const data = await res.json();
+                await refresh();
+                selectedRows.value = [];
+                showMessage(`已清除 ${data.cleared || 0} 只股票的同步数据，可重新同步`);
+            } catch (e) {
+                showMessage("批量清除失败：" + e.message, "error");
+            } finally {
+                loading.clearData = false;
+            }
+        };
+
         const triggerSync = async (body) => {
             const res = await fetch(`${API_BASE}/api/sync`, {
                 method: "POST",
@@ -642,6 +723,7 @@ const App = {
             message,
             messageType,
             newStockCode,
+            selectedRows,
             Refresh,
             Edit,
 
@@ -650,6 +732,9 @@ const App = {
             resetOverride,
             addStock,
             removeStock,
+            onSelectionChange,
+            clearSyncedData,
+            clearSelectedSyncedData,
             syncPrices,
             syncFundamentals,
             syncAll,
