@@ -71,7 +71,7 @@ async def sync_prices(codes: list[str] | None = None, progress_cb: ProgressCallb
     if codes is None:
         today = datetime.now(timezone.utc).date()
         codes = await database.list_price_sync_candidates(today)
-        logger.info("价格同步待处理 %d 只（已跳过今日已同步且价格/市值完整的股票）", len(codes))
+        logger.info("价格同步待处理 %d 只（按天判断：同步日期最新则跳过，非最新则同步）", len(codes))
 
     return await _sync_prices_fallback_by_daily(codes, progress_cb=progress_cb)
 
@@ -399,7 +399,7 @@ async def sync_dividends_and_profits(
     if codes is None:
         today = datetime.now(timezone.utc).date()
         codes = await database.list_fundamental_sync_candidates(today)
-        logger.info("分红/利润待处理 %d 只（已跳过今日已同步且有基本面的股票）", len(codes))
+        logger.info("分红/利润待处理 %d 只（按天判断：同步日期最新则跳过，非最新则同步）", len(codes))
 
     safe_concurrency = max(1, min(concurrency, 5))
     if safe_concurrency != concurrency:
