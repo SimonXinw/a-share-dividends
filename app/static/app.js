@@ -682,6 +682,76 @@ const App = {
         };
 
         // ============================================================
+        // 股价/市值趋势：当前值 vs 去年末
+        // 仅展示两色：上涨红、下跌绿；持平不展示。
+        // ============================================================
+        const makeTwoColorTrend = (currentValue, baseValue, epsilon = 1e-8) => {
+            const current = Number(currentValue);
+            const base = Number(baseValue);
+            if (!Number.isFinite(current) || !Number.isFinite(base) || base <= 0) {
+                return null;
+            }
+
+            const diff = current - base;
+            if (Math.abs(diff) < epsilon) {
+                return null;
+            }
+
+            return {
+                isUp: diff > 0,
+                ratio: Math.abs(diff) / base,
+            };
+        };
+
+        const priceTrend = (row) => {
+            return makeTwoColorTrend(row.price, row.last_year_end_price, 1e-4);
+        };
+
+        const priceTrendClass = (row) => {
+            const t = priceTrend(row);
+            if (!t) return "";
+            return t.isUp ? "trend_arrow trend_up" : "trend_arrow trend_down";
+        };
+
+        const priceTrendLabel = (row) => {
+            const t = priceTrend(row);
+            if (!t) return "";
+            return `${t.isUp ? "↑" : "↓"} ${(t.ratio * 100).toFixed(2)}%`;
+        };
+
+        const marketCapTrend = (row) => {
+            return makeTwoColorTrend(row.current_market_cap, row.last_year_end_market_cap, 1);
+        };
+
+        const marketCapTrendClass = (row) => {
+            const t = marketCapTrend(row);
+            if (!t) return "";
+            return t.isUp ? "trend_arrow trend_up" : "trend_arrow trend_down";
+        };
+
+        const marketCapTrendLabel = (row) => {
+            const t = marketCapTrend(row);
+            if (!t) return "";
+            return `${t.isUp ? "↑" : "↓"} ${(t.ratio * 100).toFixed(2)}%`;
+        };
+
+        const profitTrend = (row) => {
+            return makeTwoColorTrend(row.this_year_estimated_profit, row.last_year_net_profit, 1);
+        };
+
+        const profitTrendClass = (row) => {
+            const t = profitTrend(row);
+            if (!t) return "";
+            return t.isUp ? "trend_arrow trend_up" : "trend_arrow trend_down";
+        };
+
+        const profitTrendLabel = (row) => {
+            const t = profitTrend(row);
+            if (!t) return "";
+            return `${t.isUp ? "↑" : "↓"} ${(t.ratio * 100).toFixed(2)}%`;
+        };
+
+        // ============================================================
         // 行业差：去年股息率 vs 行业均值
         // ============================================================
         const industryDiff = (row) => {
@@ -747,6 +817,12 @@ const App = {
             yieldClass,
             trendClass,
             trendLabel,
+            priceTrendClass,
+            priceTrendLabel,
+            marketCapTrendClass,
+            marketCapTrendLabel,
+            profitTrendClass,
+            profitTrendLabel,
             industryDiffClass,
             industryDiffLabel,
             industryAvgLabel,
