@@ -28,21 +28,26 @@ async def _run_supabase(callable_obj):
             return await asyncio.to_thread(callable_obj)
         except Exception as exc:  # noqa: BLE001
             message = str(exc)
+            message_lower = message.lower()
             is_transient = any(
-                key in message
+                key in message_lower
                 for key in (
-                    "UNEXPECTED_EOF_WHILE_READING",
-                    "ConnectError",
-                    "ReadError",
-                    "Timeout",
-                    "Connection reset",
+                    "unexpected_eof_while_reading",
+                    "connecterror",
+                    "readerror",
+                    "timeout",
+                    "connection reset",
+                    "connection aborted",
+                    "remotedisconnected",
+                    "winerror 10035",
+                    "无法立即完成一个非阻止性套接字操作",
                 )
             )
 
             if (not is_transient) or attempt >= max_attempts:
                 raise
 
-            await asyncio.sleep(0.6 * attempt)
+            await asyncio.sleep(0.8 * attempt)
 
 
 def _ensure_client() -> Client:
@@ -659,16 +664,27 @@ async def upsert_etf_price_history_row(
     )
 
 
-async def list_etf_price_history(code: str, limit: int = 6000) -> list[dict]:
+async def list_etf_price_history(
+    code: str,
+    limit: int = 6000,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[dict]:
     client = _ensure_client()
-    response = await _run_supabase(
-        lambda: client.table("a_share_etf_price_history")
-        .select("trade_date,open_price,high_price,low_price,close_price,volume,amount")
-        .eq("code", code)
-        .order("trade_date")
-        .limit(limit)
-        .execute()
-    )
+
+    def _query():
+        query = (
+            client.table("a_share_etf_price_history")
+            .select("trade_date,open_price,high_price,low_price,close_price,volume,amount")
+            .eq("code", code)
+        )
+        if start_date:
+            query = query.gte("trade_date", start_date)
+        if end_date:
+            query = query.lte("trade_date", end_date)
+        return query.order("trade_date").limit(limit).execute()
+
+    response = await _run_supabase(_query)
     return response.data or []
 
 

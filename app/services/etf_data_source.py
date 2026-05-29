@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Awaitable, Callable
@@ -49,21 +50,101 @@ class AkshareEtfClient:
     async def fetch_daily_history_rows(self, code: str) -> list[dict]:
         import akshare as ak
 
-        df = await asyncio.to_thread(
-            ak.fund_etf_hist_em,
+        # 主通道：ETF 历史接口
+        try:
+            df = await asyncio.to_thread(
+                ak.fund_etf_hist_em,
+                symbol=code,
+                period="daily",
+                adjust="qfq",
+            )
+            if df is not None and not df.empty:
+                return df.to_dict("records")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[%s] fund_etf_hist_em 抓取失败，准备走备用接口: %s", code, exc)
+
+        # 备用通道 1：新浪 ETF 历史（AkShare 封装）
+        market_prefixes = ["sh", "sz"]
+        preferred_prefix = "sh" if code.startswith(("5", "6", "9")) else "sz"
+        market_prefixes.sort(key=lambda prefix: 0 if prefix == preferred_prefix else 1)
+        for prefix in market_prefixes:
+            try:
+                symbol = f"{prefix}{code}"
+                df_sina = await asyncio.to_thread(ak.fund_etf_hist_sina, symbol=symbol)
+                if df_sina is not None and not df_sina.empty:
+                    return df_sina.to_dict("records")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[%s] fund_etf_hist_sina(%s) 失败，继续尝试其他备用接口: %s", code, prefix, exc)
+
+        # 备用通道 2：A 股历史接口（ETF 代码同样可用）
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        df_fallback = await asyncio.to_thread(
+            ak.stock_zh_a_hist,
             symbol=code,
             period="daily",
+            start_date="19900101",
+            end_date=today,
             adjust="qfq",
         )
-        if df is None or df.empty:
+        if df_fallback is None or df_fallback.empty:
             return []
-        return df.to_dict("records")
+        return df_fallback.to_dict("records")
+
+
+def _guess_market_by_code(code: str) -> str:
+    if code.startswith(("0", "1", "2", "3")):
+        return "SZ"
+    return "SH"
+
+
+async def resolve_etf_identity(code: str) -> dict:
+    """按代码解析 ETF 基础信息（优先中文名称）。"""
+    normalized_code = (code or "").strip()
+    if not normalized_code:
+        return {"code": "", "name": None, "market": "SH"}
+
+    client = AkshareEtfClient()
+    resolved_name: str | None = None
+
+    try:
+        spot_rows = await client.fetch_spot_rows()
+        spot_map = _normalize_spot_rows(spot_rows)
+        spot_item = spot_map.get(normalized_code) or {}
+        name = str(spot_item.get("name") or "").strip()
+        if name:
+            resolved_name = name
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[%s] ETF 名称解析（spot）失败: %s", normalized_code, exc)
+
+    if not resolved_name:
+        try:
+            import akshare as ak
+
+            df = await asyncio.to_thread(ak.fund_name_em)
+            if df is not None and not df.empty:
+                columns = list(df.columns)
+                code_col = _pick_column(columns, ("基金代码", "代码", "symbol"))
+                name_col = _pick_column(columns, ("基金简称", "基金名称", "名称", "name"))
+                if code_col and name_col:
+                    matches = df[df[code_col].astype(str).str.strip() == normalized_code]
+                    if not matches.empty:
+                        raw_name = str(matches.iloc[0][name_col]).strip()
+                        if raw_name and raw_name not in {"-", "--", "None", "nan", "NaN"}:
+                            resolved_name = raw_name
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[%s] ETF 名称解析（fund_name_em）失败: %s", normalized_code, exc)
+
+    return {
+        "code": normalized_code,
+        "name": resolved_name,
+        "market": _guess_market_by_code(normalized_code),
+    }
 
 
 async def _fetch_history_rows_with_retry(
     client: AkshareEtfClient,
     code: str,
-    max_attempts: int = 3,
+    max_attempts: int = 6,
 ) -> list[dict]:
     last_error: Exception | None = None
     for attempt in range(1, max_attempts + 1):
@@ -73,7 +154,7 @@ async def _fetch_history_rows_with_retry(
             last_error = exc
             if attempt >= max_attempts:
                 break
-            sleep_seconds = attempt * 1.2
+            sleep_seconds = min(12.0, attempt * 1.5 + random.uniform(0.2, 1.0))
             logger.warning("[%s] ETF 历史抓取失败，第 %d/%d 次重试：%s", code, attempt, max_attempts, exc)
             await asyncio.sleep(sleep_seconds)
 

@@ -180,7 +180,7 @@ copy .env.example .env
 # 用编辑器打开 .env，至少填好 SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY（或 SUPABASE_ANON_KEY）
 
 # 2) 在【项目根目录】建虚拟环境
-python -m venv .venv
+python -m env .venv
 .venv\Scripts\activate         # Windows PowerShell
 # source .venv/bin/activate    # macOS / Linux
 
@@ -287,6 +287,8 @@ ETF 端点（新增）：
 | POST | `/api/etf/sync/blocking` | ETF 阻塞同步（失败会返回 500） |
 | GET | `/api/etf/sync/logs?limit=20` | ETF 同步日志 |
 | GET | `/api/etf/{code}/backtest?limit=6000&source=auto` | 获取指定 ETF 回测序列（MA250 / 偏离度） |
+| GET | `/api/etf/{code}/backtest/compare?limit=6000&strategies=...` | 多策略回测对比（含基准收益） |
+| GET | `/api/etf/{code}/backtest/compare/stream?limit=6000&strategies=...` | 流式多策略回测（逐个策略返回） |
 
 ETF 同步 `job_type`：
 
@@ -305,11 +307,34 @@ ETF 同步 `job_type`：
 - `realtime`：只走实时计算（依赖历史表）
 - `snapshot`：只读 `a_share_etf_backtest_snapshots` 快照
 
+`/api/etf/{code}/backtest/compare` 的 `strategies` 参数：
+
+- 逗号分隔策略 key，例如：`ma250_zone_rotation,periodic_buy_weekly,ma250_band_5pct`
+- 当前内置策略：
+  - `ma250_zone_rotation`：MA250 偏离分层仓位（当前策略）
+  - `periodic_buy_daily`：每日买入
+  - `periodic_buy_weekly`：每周买入
+  - `periodic_buy_monthly`：每月买入
+  - `periodic_buy_quarterly`：每季度买入
+  - `periodic_buy_yearly`：每年买入
+  - `ma250_band_1pct` ~ `ma250_band_10pct`：MA250 ±1%~±10% 分层加减仓
+- 返回结果包含：
+  - `benchmark`：买入并持有基准收益曲线
+  - `strategies`：策略收益曲线 + 年化收益 + 最大回撤 + 换仓次数
+
+`/api/etf/{code}/backtest/compare/stream`：
+
+- 同样只拉取一次历史数据
+- 服务端按策略逐个计算并通过 SSE 实时推送
+- 前端可“先算先展示”，不需要等待全部策略完成
+
 页面路由（新增）：
 
 - `/`：原 A 股红利股息预估表
 - `/dividend-strategy`：ETF 策略通用页面（通过 query 指定代码）
 - `/dividend-strategy/515180`：易方达中证红利 ETF 页面入口
+- `/dividend-strategy-compare`：ETF 回测对比页面
+- `/dividend-strategy-compare/515180`：指定 ETF 回测对比入口
 - `/static/dividend_strategy_yifangda_515180.html`：易方达页面壳（示例，复用通用页）
 
 示例：
@@ -327,6 +352,18 @@ ETF 同步 `job_type`：
    - MA250、偏离度等通用计算
 3. 单票业务文件：`app/services/etf_backtests/yifangda/dividend_515180.py`
    - 515180 专属策略阈值/业务输出
+
+回测对比框架（新增）：
+
+- `app/services/etf_backtests/base.py`
+  - 通用绩效计算（权益曲线、年化收益、最大回撤、换仓次数）
+- `app/services/etf_backtests/registry.py`
+  - 策略注册与批量运行（一次取数，多策略复用）
+  - 当前内置策略：
+    - `ma250_zone_rotation`（当前均线偏离分层策略）
+    - 定投策略：`periodic_buy_daily` / `periodic_buy_weekly` / `periodic_buy_monthly` / `periodic_buy_quarterly` / `periodic_buy_yearly`
+    - MA250 分层策略：`ma250_band_1pct` ~ `ma250_band_10pct`
+      - 仓位结构：底仓 0% + 定投仓 70% + 波动仓 30%
 
 新增一只 ETF 的推荐步骤：
 

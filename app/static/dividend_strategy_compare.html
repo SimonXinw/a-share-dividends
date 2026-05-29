@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ETF 策略回测对比</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, "Microsoft YaHei", sans-serif;
+            margin: 0;
+            background: #f3f5f8;
+            color: #1a202c;
+        }
+
+        .container {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .top-nav {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 10px 14px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .top-nav .nav-title {
+            font-size: 0.86rem;
+            color: #64748b;
+            font-weight: 600;
+        }
+
+        .top-nav .nav-links {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .top-nav .nav-link {
+            text-decoration: none;
+            border: 1px solid #cbd5e1;
+            color: #334155;
+            background: #f8fafc;
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .top-nav .nav-link:hover {
+            border-color: #2563eb;
+            color: #1d4ed8;
+            background: #eff6ff;
+        }
+
+        .top-nav .nav-link.active {
+            border-color: #2563eb;
+            color: #ffffff;
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1d4ed8, #1e3a8a);
+            color: #ffffff;
+            border-radius: 12px;
+            padding: 18px 20px;
+            margin-bottom: 16px;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 1.35rem;
+        }
+
+        .header .sub {
+            margin-top: 6px;
+            font-size: 0.88rem;
+            opacity: 0.88;
+        }
+
+        .panel {
+            background: #ffffff;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            padding: 16px;
+            margin-bottom: 14px;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .controls input[type="text"],
+        .controls input[type="date"] {
+            width: 140px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 0.95rem;
+        }
+
+        .controls .code-input-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .controls .input-tip {
+            font-size: 0.74rem;
+            color: #94a3b8;
+            line-height: 1.2;
+        }
+
+        .controls .input-name {
+            font-size: 0.8rem;
+            color: #334155;
+            line-height: 1.3;
+            font-weight: 600;
+        }
+
+        .controls button {
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: #ffffff;
+            padding: 8px 14px;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+
+        .controls button:hover {
+            background: #1d4ed8;
+        }
+
+        .strategy-box {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .strategy-item {
+            border: 1px solid #dbe3f1;
+            border-radius: 8px;
+            padding: 6px 10px;
+            background: #f8fafc;
+            font-size: 0.86rem;
+        }
+
+        .strategy-item input {
+            margin-right: 4px;
+        }
+
+        .status {
+            margin-top: 8px;
+            font-size: 0.86rem;
+            color: #64748b;
+        }
+
+        #compareChart {
+            width: 100%;
+            height: 420px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        th, td {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 10px 8px;
+            text-align: left;
+        }
+
+        th {
+            background: #f8fafc;
+            font-weight: 600;
+            color: #4b5563;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <nav class="top-nav">
+        <div class="nav-title">页面导航</div>
+        <div class="nav-links">
+            <a class="nav-link" href="/" id="navHome">A 股股息预估</a>
+            <a class="nav-link" href="#" id="navStrategy">ETF 策略看板</a>
+            <a class="nav-link active" href="#" id="navCompare">ETF 回测对比</a>
+        </div>
+    </nav>
+
+    <div class="header">
+        <h1 id="title">ETF 策略回测对比</h1>
+        <div class="sub">同一份历史数据下，对比基准收益与多个策略收益（年化 / 回撤 / 换仓次数）</div>
+    </div>
+
+    <div class="panel">
+        <div class="controls">
+            <label>ETF 代码：</label>
+            <div class="code-input-wrap">
+                <input id="codeInput" type="text" value="515180" list="etfCodeList" placeholder="输入或选择 ETF 代码">
+                <datalist id="etfCodeList"></datalist>
+                <div class="input-name" id="selectedEtfName">当前 ETF：--</div>
+                <div class="input-tip">可从已收录 ETF 下拉选择，也可输入新代码自动拉取</div>
+            </div>
+            <label for="startDateInput">回测开始：</label>
+            <input id="startDateInput" type="date">
+            <label for="endDateInput">回测结束：</label>
+            <input id="endDateInput" type="date">
+            <button onclick="syncLatestData()">同步最新数据</button>
+            <button onclick="loadCompare()">加载回测对比</button>
+        </div>
+        <div class="strategy-box" id="strategyBox"></div>
+        <div class="status" id="status">准备就绪</div>
+    </div>
+
+    <div class="panel">
+        <div id="compareChart"></div>
+    </div>
+
+    <div class="panel">
+        <table>
+            <thead>
+            <tr>
+                <th>策略</th>
+                <th>总收益</th>
+                <th>年化收益</th>
+                <th>最大回撤</th>
+                <th>换仓次数</th>
+                <th>区间</th>
+            </tr>
+            </thead>
+            <tbody id="summaryTbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const qs = new URLSearchParams(window.location.search);
+    const initCode = (qs.get("code") || "515180").trim();
+    const initName = (qs.get("name") || "").trim();
+    const initProvider = (qs.get("provider") || "").trim();
+    const initStartDate = (qs.get("start_date") || "").trim();
+    const initEndDate = (qs.get("end_date") || "").trim();
+    document.getElementById("codeInput").value = initCode;
+    document.getElementById("startDateInput").value = initStartDate;
+    document.getElementById("endDateInput").value = initEndDate;
+    const strategyUrl = `/dividend-strategy?code=${encodeURIComponent(initCode)}&name=${encodeURIComponent(initName || "易方达中证红利ETF")}&provider=${encodeURIComponent(initProvider || "易方达")}`;
+    const compareUrl = `/dividend-strategy-compare?code=${encodeURIComponent(initCode)}&name=${encodeURIComponent(initName)}&provider=${encodeURIComponent(initProvider)}`;
+    document.getElementById("navStrategy").setAttribute("href", strategyUrl);
+    document.getElementById("navCompare").setAttribute("href", compareUrl);
+    const strategyDefinitions = [
+        { strategy_key: "ma250_zone_rotation", strategy_name: "MA250 偏离分层仓位（当前）", checked: true },
+        { strategy_key: "periodic_buy_daily", strategy_name: "每日买入", checked: true },
+        { strategy_key: "periodic_buy_weekly", strategy_name: "每周买入", checked: true },
+        { strategy_key: "periodic_buy_monthly", strategy_name: "每月买入", checked: true },
+        { strategy_key: "periodic_buy_quarterly", strategy_name: "每季度买入", checked: true },
+        { strategy_key: "periodic_buy_yearly", strategy_name: "每年买入", checked: true },
+        { strategy_key: "ma250_band_1pct", strategy_name: "MA250 ±1% 分层加减仓", checked: true },
+        { strategy_key: "ma250_band_2pct", strategy_name: "MA250 ±2% 分层加减仓", checked: true },
+        { strategy_key: "ma250_band_3pct", strategy_name: "MA250 ±3% 分层加减仓", checked: true },
+        { strategy_key: "ma250_band_4pct", strategy_name: "MA250 ±4% 分层加减仓", checked: true },
+        { strategy_key: "ma250_band_5pct", strategy_name: "MA250 ±5% 分层加减仓", checked: true },
+        { strategy_key: "ma250_band_6pct", strategy_name: "MA250 ±6% 分层加减仓", checked: true },
+        { strategy_key: "ma250_band_7pct", strategy_name: "MA250 ±7% 分层加减仓", checked: true },
+        { strategy_key: "ma250_band_8pct", strategy_name: "MA250 ±8% 分层加减仓", checked: true },
+        { strategy_key: "ma250_band_9pct", strategy_name: "MA250 ±9% 分层加减仓", checked: true },
+        { strategy_key: "ma250_band_10pct", strategy_name: "MA250 ±10% 分层加减仓", checked: true },
+    ];
+    let compareChart = null;
+    let streamSource = null;
+    const etfInstrumentMap = {};
+    const compareState = {
+        etf: null,
+        benchmark: null,
+        strategies: [],
+        total: 0,
+        ignored: [],
+    };
+
+    function initStrategyBox() {
+        const box = document.getElementById("strategyBox");
+        box.innerHTML = strategyDefinitions.map(item => `
+            <label class="strategy-item">
+                <input type="checkbox" value="${item.strategy_key}" ${item.checked ? "checked" : ""}>
+                ${item.strategy_name}
+            </label>
+        `).join("");
+    }
+
+    function guessMarketByCode(code) {
+        if (String(code || "").startsWith("0") || String(code || "").startsWith("1") || String(code || "").startsWith("2") || String(code || "").startsWith("3")) {
+            return "SZ";
+        }
+        return "SH";
+    }
+
+    function getEtfDisplayName(code) {
+        const item = etfInstrumentMap[code] || {};
+        const name = String(item.name || "").trim();
+        return name || code;
+    }
+
+    function updateEtfNameHint(code, explicitName = "") {
+        const codeText = String(code || "").trim();
+        const name = String(explicitName || "").trim() || getEtfDisplayName(codeText);
+        const hintEl = document.getElementById("selectedEtfName");
+        hintEl.textContent = `当前 ETF：${name}（${codeText || "--"}）`;
+    }
+
+    function fmtPct(v) {
+        if (v === null || v === undefined || Number.isNaN(v)) return "--";
+        const n = Number(v);
+        return (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
+    }
+
+    function selectedStrategies() {
+        const checked = Array.from(document.querySelectorAll(".strategy-box input:checked"));
+        return checked.map(el => el.value);
+    }
+
+    function getDateRangeParams() {
+        const startDate = (document.getElementById("startDateInput").value || "").trim();
+        const endDate = (document.getElementById("endDateInput").value || "").trim();
+        if (startDate && endDate && startDate > endDate) {
+            throw new Error("回测开始日期不能晚于结束日期");
+        }
+        return { startDate, endDate };
+    }
+
+    async function loadEtfCodeOptions() {
+        const status = document.getElementById("status");
+        try {
+            const response = await fetch("/api/etf/instruments");
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const payload = await response.json();
+            const listEl = document.getElementById("etfCodeList");
+            const items = payload.items || [];
+            listEl.innerHTML = items.map(item => {
+                const code = (item.code || "").trim();
+                const name = (item.name || code).trim();
+                etfInstrumentMap[code] = item;
+                return `<option value="${code}" label="${name} (${code})">${name} (${code})</option>`;
+            }).join("");
+
+            const currentCode = (document.getElementById("codeInput").value || "").trim();
+            if (!currentCode && items.length > 0) {
+                document.getElementById("codeInput").value = items[0].code || "515180";
+            }
+            updateEtfNameHint((document.getElementById("codeInput").value || "").trim());
+        } catch (error) {
+            status.textContent = `ETF 列表加载失败：${error.message}`;
+        }
+    }
+
+    function updateTable() {
+        const benchmark = compareState.benchmark;
+        const strategies = compareState.strategies;
+        if (!benchmark) return;
+        const rows = [];
+        rows.push({
+            strategy_name: benchmark.strategy_name,
+            summary: benchmark.summary,
+        });
+        strategies.forEach(item => rows.push(item));
+
+        const tbody = document.getElementById("summaryTbody");
+        tbody.innerHTML = rows.map(row => {
+            const s = row.summary || {};
+            return `<tr>
+                <td>${row.strategy_name}</td>
+                <td>${fmtPct(s.total_return_pct)}</td>
+                <td>${fmtPct(s.annualized_return_pct)}</td>
+                <td>${fmtPct(-Math.abs(Number(s.max_drawdown_pct || 0)))}</td>
+                <td>${s.trade_count ?? 0}</td>
+                <td>${s.start_date || "--"} ~ ${s.end_date || "--"}</td>
+            </tr>`;
+        }).join("");
+    }
+
+    function renderChart() {
+        const benchmark = compareState.benchmark;
+        const strategies = compareState.strategies;
+        if (!benchmark) return;
+        if (!compareChart) {
+            compareChart = echarts.init(document.getElementById("compareChart"));
+        }
+        const dateAxis = (benchmark.equity_curve || []).map(item => item.date);
+        const series = [
+            {
+                name: benchmark.strategy_name,
+                type: "line",
+                showSymbol: false,
+                data: (benchmark.equity_curve || []).map(item => Number(item.nav)),
+            },
+        ];
+
+        strategies.forEach(strategy => {
+            series.push({
+                name: strategy.strategy_name,
+                type: "line",
+                showSymbol: false,
+                data: (strategy.equity_curve || []).map(item => Number(item.nav)),
+            });
+        });
+
+        compareChart.setOption({
+            tooltip: { trigger: "axis" },
+            legend: { top: 8 },
+            grid: { top: 56, right: 24, bottom: 56, left: 56 },
+            xAxis: {
+                type: "category",
+                data: dateAxis,
+                axisLabel: { fontSize: 10, interval: Math.max(1, Math.floor(dateAxis.length / 10)) },
+            },
+            yAxis: {
+                type: "value",
+                axisLabel: {
+                    formatter(value) {
+                        return value.toFixed(2);
+                    },
+                },
+            },
+            dataZoom: [
+                { type: "inside", start: 70, end: 100 },
+                { type: "slider", start: 70, end: 100, height: 20 },
+            ],
+            series: series,
+        }, true);
+    }
+
+    function renderPartial() {
+        updateTable();
+        renderChart();
+    }
+
+    function resetState() {
+        compareState.etf = null;
+        compareState.benchmark = null;
+        compareState.strategies = [];
+        compareState.total = 0;
+        compareState.ignored = [];
+        document.getElementById("summaryTbody").innerHTML = "";
+        if (compareChart) {
+            compareChart.clear();
+        }
+    }
+
+    function upsertStrategy(strategyData) {
+        const idx = compareState.strategies.findIndex(item => item.strategy_key === strategyData.strategy_key);
+        if (idx >= 0) {
+            compareState.strategies[idx] = strategyData;
+        } else {
+            compareState.strategies.push(strategyData);
+        }
+    }
+
+    async function ensureEtfDataReady(code, statusEl) {
+        const exists = etfInstrumentMap[code];
+        if (!exists) {
+            statusEl.textContent = "未发现可回测历史，正在创建 ETF 条目...";
+            const instrumentResponse = await fetch("/api/etf/instruments", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    code: code,
+                    name: "",
+                    provider: "未知",
+                    market: guessMarketByCode(code),
+                }),
+            });
+            if (!instrumentResponse.ok) {
+                let message = `HTTP ${instrumentResponse.status}`;
+                try {
+                    const payload = await instrumentResponse.json();
+                    message = payload.detail || payload.message || message;
+                } catch (_) {
+                    // ignore parse error
+                }
+                throw new Error(`创建 ETF 条目失败：${message}`);
+            }
+            await loadEtfCodeOptions();
+            updateEtfNameHint(code);
+        }
+
+        const ok = await syncLatestData(code, false);
+        if (!ok) {
+            throw new Error("自动同步历史数据失败");
+        }
+    }
+
+    async function syncLatestData(forceCode = null, showDoneMessage = true) {
+        const statusEl = document.getElementById("status");
+        const code = (forceCode || document.getElementById("codeInput").value || "").trim();
+        if (!code) {
+            statusEl.textContent = "请先输入 ETF 代码";
+            return false;
+        }
+        updateEtfNameHint(code);
+
+        const exists = etfInstrumentMap[code];
+        if (!exists) {
+            statusEl.textContent = "未发现该 ETF，正在创建条目...";
+            const instrumentResponse = await fetch("/api/etf/instruments", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    code: code,
+                    name: "",
+                    provider: "未知",
+                    market: guessMarketByCode(code),
+                }),
+            });
+            if (!instrumentResponse.ok) {
+                let message = `HTTP ${instrumentResponse.status}`;
+                try {
+                    const payload = await instrumentResponse.json();
+                    message = payload.detail || payload.message || message;
+                } catch (_) {
+                    // ignore parse error
+                }
+                statusEl.textContent = `创建 ETF 条目失败：${message}`;
+                return false;
+            }
+            await loadEtfCodeOptions();
+            updateEtfNameHint(code);
+        } else {
+            statusEl.textContent = "正在同步最新历史数据（增量）...";
+        }
+
+        statusEl.textContent = "正在拉取并同步 ETF 历史数据（增量）...";
+        const syncResponse = await fetch("/api/etf/sync/blocking", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                job_type: "history",
+                codes: [code],
+            }),
+        });
+        if (!syncResponse.ok) {
+            let message = `HTTP ${syncResponse.status}`;
+            try {
+                const payload = await syncResponse.json();
+                message = payload.detail || payload.message || message;
+            } catch (_) {
+                // ignore parse error
+            }
+            statusEl.textContent = `同步失败：${message}（可稍后重试）`;
+            return false;
+        }
+        if (showDoneMessage) {
+            statusEl.textContent = "同步完成";
+        }
+        return true;
+    }
+
+    async function loadCompare() {
+        const status = document.getElementById("status");
+        const code = document.getElementById("codeInput").value.trim() || "515180";
+        updateEtfNameHint(code);
+        let dateRange;
+        try {
+            dateRange = getDateRangeParams();
+        } catch (error) {
+            status.textContent = `加载失败：${error.message}`;
+            return;
+        }
+        const strategyKeys = selectedStrategies();
+        const strategyParam = encodeURIComponent(strategyKeys.join(","));
+        const query = new URLSearchParams({
+            limit: "10000",
+            strategies: strategyKeys.join(","),
+        });
+        if (dateRange.startDate) {
+            query.set("start_date", dateRange.startDate);
+        }
+        if (dateRange.endDate) {
+            query.set("end_date", dateRange.endDate);
+        }
+        const url = `/api/etf/${code}/backtest/compare/stream?${query.toString()}`;
+
+        if (streamSource) {
+            streamSource.close();
+            streamSource = null;
+        }
+        resetState();
+
+        status.textContent = "正在检查历史数据...";
+        try {
+            const probeQuery = new URLSearchParams({ limit: "1", source: "realtime" });
+            if (dateRange.startDate) {
+                probeQuery.set("start_date", dateRange.startDate);
+            }
+            if (dateRange.endDate) {
+                probeQuery.set("end_date", dateRange.endDate);
+            }
+            const probe = await fetch(`/api/etf/${code}/backtest?${probeQuery.toString()}`);
+            if (probe.status === 404) {
+                await ensureEtfDataReady(code, status);
+            } else if (!probe.ok) {
+                let message = `HTTP ${probe.status}`;
+                try {
+                    const payload = await probe.json();
+                    message = payload.detail || payload.message || message;
+                } catch (_) {
+                    // ignore parse error
+                }
+                throw new Error(`预检查失败：${message}`);
+            }
+        } catch (error) {
+            status.textContent = `加载失败：${error.message}`;
+            return;
+        }
+
+        const rangeText = `${dateRange.startDate || "--"} ~ ${dateRange.endDate || "--"}`;
+        status.textContent = `开始加载（流式计算中）... 回测区间：${rangeText}`;
+        streamSource = new EventSource(url);
+        streamSource.onmessage = event => {
+            try {
+                const payload = JSON.parse(event.data);
+                if (payload.type === "meta") {
+                    compareState.etf = payload.etf || null;
+                    compareState.total = payload.total || 0;
+                    compareState.ignored = payload.ignored_strategies || [];
+                    const etf = compareState.etf || {};
+                    const displayName = etf.name || getEtfDisplayName(code);
+                    document.getElementById("title").textContent = `${displayName} 回测策略对比`;
+                    updateEtfNameHint(code, displayName);
+                    status.textContent = "基准策略计算中...";
+                    return;
+                }
+                if (payload.type === "benchmark") {
+                    compareState.benchmark = payload.data || null;
+                    renderPartial();
+                    status.textContent = "基准已完成，策略逐个回测中...";
+                    return;
+                }
+                if (payload.type === "strategy") {
+                    upsertStrategy(payload.data || {});
+                    renderPartial();
+                    status.textContent = `已完成 ${compareState.strategies.length} 个策略`;
+                    return;
+                }
+                if (payload.type === "done") {
+                    const ignored = compareState.ignored.length > 0
+                        ? `，忽略策略: ${compareState.ignored.join(",")}`
+                        : "";
+                    status.textContent = `加载完成：${compareState.total} 条数据，${compareState.strategies.length} 个策略${ignored}`;
+                    streamSource.close();
+                    streamSource = null;
+                    return;
+                }
+                if (payload.type === "error") {
+                    status.textContent = `加载失败：${payload.message || "未知错误"}`;
+                    streamSource.close();
+                    streamSource = null;
+                }
+            } catch (error) {
+                status.textContent = `解析流式数据失败：${error.message}`;
+            }
+        };
+
+        streamSource.onerror = () => {
+            status.textContent = "连接中断，请重试";
+            if (streamSource) {
+                streamSource.close();
+                streamSource = null;
+            }
+        };
+    }
+
+    initStrategyBox();
+    loadEtfCodeOptions();
+    document.getElementById("codeInput").addEventListener("input", event => {
+        const code = String(event.target.value || "").trim();
+        if (!code) {
+            return;
+        }
+        updateEtfNameHint(code);
+    });
+    document.getElementById("startDateInput").addEventListener("change", () => {
+        const status = document.getElementById("status");
+        try {
+            getDateRangeParams();
+            status.textContent = "回测时间段已更新";
+        } catch (error) {
+            status.textContent = error.message;
+        }
+    });
+    document.getElementById("endDateInput").addEventListener("change", () => {
+        const status = document.getElementById("status");
+        try {
+            getDateRangeParams();
+            status.textContent = "回测时间段已更新";
+        } catch (error) {
+            status.textContent = error.message;
+        }
+    });
+    window.addEventListener("resize", () => {
+        if (compareChart) {
+            compareChart.resize();
+        }
+    });
+    loadCompare();
+</script>
+</body>
+</html>

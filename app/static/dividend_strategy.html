@@ -35,6 +35,55 @@
             line-height: 1.6;
         }
 
+        .top-nav {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 10px 14px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .top-nav .nav-title {
+            font-size: 0.86rem;
+            color: var(--light);
+            font-weight: 600;
+        }
+
+        .top-nav .nav-links {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .top-nav .nav-link {
+            text-decoration: none;
+            border: 1px solid #cbd5e1;
+            color: #334155;
+            background: #f8fafc;
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .top-nav .nav-link:hover {
+            border-color: #2563eb;
+            color: #1d4ed8;
+            background: #eff6ff;
+        }
+
+        .top-nav .nav-link.active {
+            border-color: #2563eb;
+            color: #ffffff;
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+        }
+
         /* ── Header ── */
         .header {
             background: linear-gradient(135deg, #1a365d, #2563eb);
@@ -620,6 +669,15 @@
 
 <body>
 
+    <nav class="top-nav">
+        <div class="nav-title">页面导航</div>
+        <div class="nav-links">
+            <a class="nav-link" href="/" id="navHome">A 股股息预估</a>
+            <a class="nav-link active" href="#" id="navStrategy">ETF 策略看板</a>
+            <a class="nav-link" href="#" id="navCompare">ETF 回测对比</a>
+        </div>
+    </nav>
+
     <div class="header">
         <div>
             <h1 id="pageMainTitle">📈 ETF 年线策略看板</h1>
@@ -807,9 +865,13 @@
         const ETF_PROVIDER = (qs.get("provider") || "易方达").trim();
         const API_BASE = "";
         const API_LIMIT = 10000;
+        const strategyUrl = `/dividend-strategy?code=${encodeURIComponent(ETF_CODE)}&name=${encodeURIComponent(ETF_NAME)}&provider=${encodeURIComponent(ETF_PROVIDER)}`;
+        const compareUrl = `/dividend-strategy-compare?code=${encodeURIComponent(ETF_CODE)}&name=${encodeURIComponent(ETF_NAME)}&provider=${encodeURIComponent(ETF_PROVIDER)}`;
 
         document.title = `${ETF_NAME} · 年线策略`;
         document.getElementById("pageMainTitle").textContent = `📈 ${ETF_NAME} · 年线策略看板`;
+        document.getElementById("navStrategy").setAttribute("href", strategyUrl);
+        document.getElementById("navCompare").setAttribute("href", compareUrl);
 
         // ── 全局状态 ──────────────────────────────────────────────────────────────
         let gLatestDev = null; // 最新偏离度，供 budget 变动时刷新策略

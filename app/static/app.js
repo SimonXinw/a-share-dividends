@@ -789,6 +789,10 @@ const App = {
             window.location.href = "/dividend-strategy/515180";
         };
 
+        const goToDividendComparePage = () => {
+            window.location.href = "/dividend-strategy-compare/515180";
+        };
+
         onMounted(refresh);
 
         return {
@@ -814,6 +818,7 @@ const App = {
             syncAll,
             refreshRiskFreeRate,
             goToDividendStrategyPage,
+            goToDividendComparePage,
 
             formatNumber,
             formatPercent,

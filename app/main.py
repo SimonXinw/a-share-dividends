@@ -144,6 +144,17 @@ async def dividend_strategy_page_with_code(code: str) -> RedirectResponse:
     return RedirectResponse(url=f"/dividend-strategy?code={code}")
 
 
+@app.get("/dividend-strategy-compare", response_class=HTMLResponse)
+async def dividend_strategy_compare_page() -> HTMLResponse:
+    html = (STATIC_DIR / "dividend_strategy_compare.html").read_text(encoding="utf-8")
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/dividend-strategy-compare/{code}", response_class=RedirectResponse)
+async def dividend_strategy_compare_page_with_code(code: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/dividend-strategy-compare?code={code}")
+
+
 if __name__ == "__main__":
     import uvicorn
 
