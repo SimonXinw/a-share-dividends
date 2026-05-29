@@ -82,3 +82,19 @@ class StockAddPayload(BaseModel):
 
 class StockBatchClearPayload(BaseModel):
     codes: list[str] = Field(..., min_length=1, description="要清除同步数据的股票代码列表")
+
+
+# ============================================================================
+# ETF
+# ============================================================================
+class EtfInstrumentPayload(BaseModel):
+    code: str = Field(..., description="ETF 代码，如 515180")
+    name: Optional[str] = Field(None, description="ETF 名称")
+    provider: Optional[str] = Field("易方达", description="发行商，如 易方达")
+    tracking_index: Optional[str] = Field(None, description="跟踪指数")
+    market: Optional[str] = Field("SH", description="交易所：SH / SZ")
+
+
+class EtfSyncRequest(BaseModel):
+    job_type: str = Field("all", description="支持: price / history / all")
+    codes: Optional[list[str]] = Field(None, description="为空时同步所有启用 ETF")

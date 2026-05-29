@@ -127,6 +127,36 @@ a-share-dividends/
 | `a_share_sync_logs` | 同步任务日志 |
 | `a_share_dashboard_view` | 视图：把上面表格 join 好供后端读取 |
 
+### 4.3 ETF 扩展（可扩展方案）
+
+如果要启用 ETF（默认预置 **易方达中证红利ETF 515180**），在 SQL Editor 再执行：
+
+```sql
+-- 运行仓库脚本
+sql/migration_add_etf_tables.sql
+sql/migration_add_etf_backtest_snapshots.sql
+```
+
+会新增（均带 `a_share_etf_` 前缀）：
+
+- `a_share_etf_instruments`：ETF 基础信息（发行商/指数/是否启用）
+- `a_share_etf_prices`：ETF 最新价格快照
+- `a_share_etf_price_history`：ETF 日线历史（回测预留）
+- `a_share_etf_distributions`：ETF 分红/拆分事件（回测预留）
+- `a_share_etf_sync_logs`：ETF 同步日志
+- `a_share_etf_dashboard_view`：ETF 看板视图
+- `a_share_etf_backtest_snapshots`：ETF 回测快照（离线/缓存结果）
+
+### 4.4 一张表放多只 ETF 是否可行？
+
+可行。当前设计就是**同类型 ETF 放在同一批表**：
+
+- 主键/唯一约束：`a_share_etf_price_history (code, trade_date)`，天然按 ETF 代码隔离
+- 索引：`idx_a_share_etf_price_history_code_date (code, trade_date desc)`
+- 量级：单票几千条日线属于轻量级，几十只 ETF 也仍在 PostgreSQL 常规能力范围内
+
+因此现阶段不需要为每只 ETF 单独建表，更不需要拆新数据库。
+
 会自动给 `updated_at` 字段加触发器，并塞 5 条示例股票（茅台/工行/招行/美的/长江电力），方便启动后立即看到效果。
 
 ### 4.2 配置 Supabase HTTP 访问
@@ -245,6 +275,65 @@ docker run -d --name a-share-dividends \
 | POST | `/api/sync/blocking` | 阻塞同步（一次性脚本用） |
 | GET | `/api/sync/logs?limit=20` | 同步日志 |
 | GET | `/api/health` | 健康检查 |
+
+ETF 端点（新增）：
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| GET | `/api/etf/instruments` | 获取 ETF 列表（含最新价格） |
+| POST | `/api/etf/instruments` | 新增/启用 ETF |
+| DELETE | `/api/etf/instruments/{code}` | 移除 ETF（软删除） |
+| POST | `/api/etf/sync` | ETF 价格异步同步 |
+| POST | `/api/etf/sync/blocking` | ETF 阻塞同步（失败会返回 500） |
+| GET | `/api/etf/sync/logs?limit=20` | ETF 同步日志 |
+| GET | `/api/etf/{code}/backtest?limit=6000&source=auto` | 获取指定 ETF 回测序列（MA250 / 偏离度） |
+
+ETF 同步 `job_type`：
+
+- `price`：仅同步最新价格快照
+- `history`：仅同步日线历史（回测所需）
+- `all`：价格 + 历史一起同步（默认）
+
+`/api/etf/sync/blocking` 返回说明：
+
+- 全部成功：返回 `200`
+- 任一阶段失败（如 `history` 失败）：返回 `500`，并在 `a_share_etf_sync_logs` 记录 `failed`
+
+`/api/etf/{code}/backtest` 的 `source` 参数：
+
+- `auto`（默认）：优先实时计算；无历史时尝试读取快照
+- `realtime`：只走实时计算（依赖历史表）
+- `snapshot`：只读 `a_share_etf_backtest_snapshots` 快照
+
+页面路由（新增）：
+
+- `/`：原 A 股红利股息预估表
+- `/dividend-strategy`：ETF 策略通用页面（通过 query 指定代码）
+- `/dividend-strategy/515180`：易方达中证红利 ETF 页面入口
+- `/static/dividend_strategy_yifangda_515180.html`：易方达页面壳（示例，复用通用页）
+
+示例：
+
+- `/dividend-strategy?code=515180&name=易方达中证红利ETF&provider=易方达`
+- 后续新增 ETF 可以继续复用同一页面框架，只改参数即可。
+
+## 7.1 ETF 回测代码组织（可扩展）
+
+后端采用三层：
+
+1. 通用抓取层：`app/services/etf_data_source.py`
+   - AKShare 行情/历史拉取与字段归一化
+2. 通用回测基类：`app/services/etf_backtests/base.py`
+   - MA250、偏离度等通用计算
+3. 单票业务文件：`app/services/etf_backtests/yifangda/dividend_515180.py`
+   - 515180 专属策略阈值/业务输出
+
+新增一只 ETF 的推荐步骤：
+
+1. 在 `a_share_etf_instruments` 增加代码
+2. 新建一个业务文件（如 `app/services/etf_backtests/yifangda/dividend_xxxxxx.py`）
+3. 在 `app/services/etf_backtests/registry.py` 注册映射
+4. 执行 `/api/etf/sync`（`job_type=all`）后页面即可复用
 
 ---
 

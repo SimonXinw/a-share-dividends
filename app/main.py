@@ -10,12 +10,12 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import database
 from .config import settings
-from .routers import macro, stocks, sync
+from .routers import etf, macro, stocks, sync
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,6 +102,7 @@ app.router.default_response_class = DecimalJSONResponse
 app.include_router(stocks.router)
 app.include_router(sync.router)
 app.include_router(macro.router)
+app.include_router(etf.router)
 
 
 @app.get("/api/health")
@@ -130,6 +131,17 @@ async def index() -> HTMLResponse:
     html = html.replace("__CSS_VERSION__", _static_version("style.css"))
     html = html.replace("__JS_VERSION__", _static_version("app.js"))
     return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/dividend-strategy", response_class=HTMLResponse)
+async def dividend_strategy_page() -> HTMLResponse:
+    html = (STATIC_DIR / "dividend_strategy.html").read_text(encoding="utf-8")
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/dividend-strategy/{code}", response_class=RedirectResponse)
+async def dividend_strategy_page_with_code(code: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/dividend-strategy?code={code}")
 
 
 if __name__ == "__main__":

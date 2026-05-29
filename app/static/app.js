@@ -785,6 +785,10 @@ const App = {
             // 提示已迁移到组件内部，此处保留占位
         };
 
+        const goToDividendStrategyPage = () => {
+            window.location.href = "/dividend-strategy/515180";
+        };
+
         onMounted(refresh);
 
         return {
@@ -809,6 +813,7 @@ const App = {
             syncFundamentals,
             syncAll,
             refreshRiskFreeRate,
+            goToDividendStrategyPage,
 
             formatNumber,
             formatPercent,

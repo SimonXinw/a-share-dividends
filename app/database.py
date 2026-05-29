@@ -498,3 +498,319 @@ async def upsert_quarterly_profit(code: str, year: int, quarter: int, net_profit
         )
         .execute()
     )
+
+
+# ============================================================================
+# ETF 数据访问
+# ============================================================================
+async def list_etf_dashboard_rows() -> list[dict]:
+    client = _ensure_client()
+    select_candidates = [
+        "code,name,provider,tracking_index,market,latest_price,price_date,price_sync_date,history_sync_date,updated_at",
+        "code,name,provider,tracking_index,market,latest_price,price_date,price_sync_date,updated_at",
+    ]
+
+    for select_clause in select_candidates:
+        try:
+            response = await _run_supabase(
+                lambda: client.table("a_share_etf_dashboard_view")
+                .select(select_clause)
+                .order("code")
+                .execute()
+            )
+            return response.data or []
+        except Exception:
+            continue
+
+    raise RuntimeError("a_share_etf_dashboard_view 查询失败，请检查 ETF 迁移是否执行")
+
+
+async def list_etf_active_codes() -> list[str]:
+    client = _ensure_client()
+    response = await _run_supabase(
+        lambda: client.table("a_share_etf_instruments").select("code").eq("is_active", True).execute()
+    )
+    return [row["code"] for row in (response.data or [])]
+
+
+async def list_etf_price_sync_candidates(today: date) -> list[str]:
+    rows = await list_etf_dashboard_rows()
+    candidates: list[str] = []
+    for row in rows:
+        if _same_day(row.get("price_sync_date"), today):
+            continue
+        candidates.append(row["code"])
+    return candidates
+
+
+async def upsert_etf_instrument(
+    code: str,
+    name: str,
+    provider: str,
+    tracking_index: str | None,
+    market: str,
+) -> None:
+    client = _ensure_client()
+    payload = {
+        "code": code,
+        "name": name or code,
+        "provider": provider or "易方达",
+        "tracking_index": tracking_index,
+        "market": market or "SH",
+        "is_active": True,
+    }
+    await _run_supabase(
+        lambda: client.table("a_share_etf_instruments").upsert(payload, on_conflict="code").execute()
+    )
+
+
+async def deactivate_etf_instrument(code: str) -> None:
+    client = _ensure_client()
+    await _run_supabase(
+        lambda: client.table("a_share_etf_instruments")
+        .update({"is_active": False})
+        .eq("code", code)
+        .execute()
+    )
+
+
+async def update_etf_name_if_needed(code: str, name: str) -> None:
+    if not name:
+        return
+
+    client = _ensure_client()
+    await _run_supabase(
+        lambda: client.table("a_share_etf_instruments")
+        .update({"name": name})
+        .eq("code", code)
+        .execute()
+    )
+
+
+async def upsert_etf_price(code: str, price: Decimal) -> None:
+    client = _ensure_client()
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    await _run_supabase(
+        lambda: client.table("a_share_etf_prices")
+        .upsert(
+            {
+                "code": code,
+                "latest_price": str(price),
+                "price_date": today_iso,
+                "updated_at": _utc_now_iso(),
+            },
+            on_conflict="code",
+        )
+        .execute()
+    )
+
+
+async def mark_etf_price_synced(code: str) -> None:
+    client = _ensure_client()
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    await _run_supabase(
+        lambda: client.table("a_share_etf_instruments")
+        .update({"price_sync_date": today_iso})
+        .eq("code", code)
+        .execute()
+    )
+
+
+async def mark_etf_history_synced(code: str) -> None:
+    client = _ensure_client()
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    await _run_supabase(
+        lambda: client.table("a_share_etf_instruments")
+        .update({"history_sync_date": today_iso})
+        .eq("code", code)
+        .execute()
+    )
+
+
+async def upsert_etf_price_history_row(
+    code: str,
+    trade_date: str,
+    open_price: Decimal | None,
+    high_price: Decimal | None,
+    low_price: Decimal | None,
+    close_price: Decimal,
+    volume: Decimal | None,
+    amount: Decimal | None,
+) -> None:
+    client = _ensure_client()
+    await _run_supabase(
+        lambda: client.table("a_share_etf_price_history")
+        .upsert(
+            {
+                "code": code,
+                "trade_date": trade_date,
+                "open_price": str(open_price) if open_price is not None else None,
+                "high_price": str(high_price) if high_price is not None else None,
+                "low_price": str(low_price) if low_price is not None else None,
+                "close_price": str(close_price),
+                "volume": str(volume) if volume is not None else None,
+                "amount": str(amount) if amount is not None else None,
+                "source": "akshare",
+                "updated_at": _utc_now_iso(),
+            },
+            on_conflict="code,trade_date",
+        )
+        .execute()
+    )
+
+
+async def list_etf_price_history(code: str, limit: int = 6000) -> list[dict]:
+    client = _ensure_client()
+    response = await _run_supabase(
+        lambda: client.table("a_share_etf_price_history")
+        .select("trade_date,open_price,high_price,low_price,close_price,volume,amount")
+        .eq("code", code)
+        .order("trade_date")
+        .limit(limit)
+        .execute()
+    )
+    return response.data or []
+
+
+async def get_etf_history_latest_trade_date(code: str) -> str | None:
+    client = _ensure_client()
+    response = await _run_supabase(
+        lambda: client.table("a_share_etf_price_history")
+        .select("trade_date")
+        .eq("code", code)
+        .order("trade_date", desc=True)
+        .limit(1)
+        .execute()
+    )
+    row = (response.data or [None])[0]
+    if not row:
+        return None
+    return row.get("trade_date")
+
+
+async def upsert_etf_backtest_snapshot(code: str, payload: dict) -> None:
+    """保存 ETF 回测快照（用于页面快速读取/离线策略结果落库）。"""
+    client = _ensure_client()
+    strategy = payload.get("strategy") or {}
+    snapshot_payload = {
+        "code": code,
+        "strategy_key": strategy.get("strategy_key"),
+        "ma_window": strategy.get("ma_window"),
+        "latest_zone": strategy.get("latest_zone"),
+        "latest_deviation_pct": strategy.get("latest_deviation_pct"),
+        "item_count": payload.get("total"),
+        "payload": payload,
+        "generated_at": _utc_now_iso(),
+        "updated_at": _utc_now_iso(),
+    }
+    try:
+        await _run_supabase(
+            lambda: client.table("a_share_etf_backtest_snapshots")
+            .upsert(snapshot_payload, on_conflict="code")
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("ETF 回测快照写入跳过（可能尚未执行迁移）: %s", exc)
+
+
+async def get_etf_backtest_snapshot(code: str) -> dict | None:
+    client = _ensure_client()
+    try:
+        response = await _run_supabase(
+            lambda: client.table("a_share_etf_backtest_snapshots")
+            .select("code,payload,generated_at,updated_at,item_count")
+            .eq("code", code)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("ETF 回测快照读取跳过（可能尚未执行迁移）: %s", exc)
+        return None
+
+    row = (response.data or [None])[0]
+    if not row:
+        return None
+    return row
+
+
+async def create_etf_sync_log(job_type: str, started_at: datetime) -> int | None:
+    client = _ensure_client()
+    response = await _run_supabase(
+        lambda: client.table("a_share_etf_sync_logs")
+        .insert(
+            {
+                "job_type": job_type,
+                "status": "running",
+                "started_at": started_at.isoformat(),
+            }
+        )
+        .execute()
+    )
+    if response.data:
+        return response.data[0].get("id")
+    return None
+
+
+async def mark_etf_sync_log_success(log_id: int | None, affected_rows: int) -> None:
+    if log_id is None:
+        return
+
+    client = _ensure_client()
+    await _run_supabase(
+        lambda: client.table("a_share_etf_sync_logs")
+        .update(
+            {
+                "status": "success",
+                "affected_rows": affected_rows,
+                "finished_at": _utc_now_iso(),
+            }
+        )
+        .eq("id", log_id)
+        .execute()
+    )
+
+
+async def mark_etf_sync_log_failed(log_id: int | None, message: str) -> None:
+    if log_id is None:
+        return
+
+    client = _ensure_client()
+    await _run_supabase(
+        lambda: client.table("a_share_etf_sync_logs")
+        .update({"status": "failed", "message": message, "finished_at": _utc_now_iso()})
+        .eq("id", log_id)
+        .execute()
+    )
+
+
+async def update_etf_sync_log_progress(
+    log_id: int | None,
+    message: str,
+    affected_rows: int | None = None,
+) -> None:
+    if log_id is None:
+        return
+
+    client = _ensure_client()
+    payload: dict[str, Any] = {"message": message}
+    if affected_rows is not None:
+        payload["affected_rows"] = affected_rows
+
+    await _run_supabase(
+        lambda: client.table("a_share_etf_sync_logs")
+        .update(payload)
+        .eq("id", log_id)
+        .execute()
+    )
+
+
+async def list_etf_sync_logs(limit: int = 20) -> list[dict]:
+    client = _ensure_client()
+    response = await _run_supabase(
+        lambda: client.table("a_share_etf_sync_logs")
+        .select("id,job_type,status,affected_rows,message,started_at,finished_at")
+        .order("started_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return response.data or []
