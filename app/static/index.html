@@ -156,7 +156,7 @@
               <el-table-column
                 prop="industry"
                 label="行业"
-                width="70"
+                width="75"
                 header-cell-class-name="readonly_col_header"
               ></el-table-column>
               <el-table-column
@@ -233,6 +233,21 @@
                       {{ priceTrendLabel(row) }}
                     </span>
                   </div>
+                </template>
+              </el-table-column>
+
+              <el-table-column
+                label="预估PE"
+                width="70"
+                sortable
+                align="right"
+                header-cell-class-name="readonly_col_header"
+                :sort-method="(a, b) => num(a.this_year_estimated_pe) - num(b.this_year_estimated_pe)"
+              >
+                <template #default="{ row }">
+                  <span class="readonly">{{
+                    formatNumber(row.this_year_estimated_pe, 2)
+                  }}</span>
                 </template>
               </el-table-column>
 
@@ -420,17 +435,18 @@
             <p><strong>说明：</strong></p>
             <ul>
               <li>
-                双击单元格即可编辑（股票代码、股名、行业、去年股息率、预估每股分红
-                由计算/数据源给出，不可改）。
+                双击单元格即可编辑（股票代码、股名、行业、去年股息率、预估每股分红、预估
+                PE 由计算/数据源给出，不可改）。
               </li>
               <li>
-                编辑保存后会立即重新计算「去年股息率」「今年预估每股分红」「今年预估股息率」。
+                编辑保存后会立即重新计算「去年股息率」「今年预估每股分红」「今年预估股息率」「预估
+                PE」。
               </li>
               <li>
                 计算公式：今年预估净利润 = 去年净利润 - 去年「已替换季度」净利润
                 + 今年已发布季度净利润；今年预估每股分红 = 去年每股分红 ×
                 今年预估净利润 / 去年净利润；今年预估股息率 = 今年预估每股分红 /
-                当前股价。
+                当前股价；预估 PE = 当前市值（元）/ 今年预估净利润（元），保留两位小数。
               </li>
               <li>
                 “当前市值/去年年末市值”在股价同步阶段一并更新，所以点「一键同步全部」即可。

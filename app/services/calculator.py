@@ -16,6 +16,7 @@
         this_year_estimated_dividend_per_share =
             last_year_dividend_per_share * this_year_estimated_profit / last_year_profit
 4. 今年预估股息率 = this_year_estimated_dividend_per_share / current_price
+5. 今年预估 PE = current_market_cap / this_year_estimated_profit（市值与净利润均为元，结果为无量纲倍数）
 
 如果缺少必要数据（去年净利润缺失等），则只展示已有字段，预估字段为 None。
 """
@@ -120,6 +121,13 @@ def calc_yield(dividend_per_share: Decimal | None, price: Decimal | None) -> Dec
     return dividend_per_share / price
 
 
+def calc_pe(market_cap: Decimal | None, net_profit: Decimal | None) -> Decimal | None:
+    """预估 PE = 当前市值（元）/ 今年预估净利润（元），无量纲倍数。"""
+    if market_cap is None or net_profit is None or net_profit == 0:
+        return None
+    return market_cap / net_profit
+
+
 # ============================================================================
 # 从数据库一次性聚合所有 active 股票的计算上下文
 # ============================================================================
@@ -189,6 +197,7 @@ def context_to_row(ctx: CalculationContext) -> dict:
     estimated_profit = estimate_this_year_profit(ctx)
     estimated_div = estimate_this_year_dividend_per_share(ctx)
     estimated_yield = calc_yield(estimated_div, ctx.price)
+    estimated_pe = calc_pe(ctx.current_market_cap, estimated_profit)
 
     return {
         "code": ctx.code,
@@ -211,6 +220,7 @@ def context_to_row(ctx: CalculationContext) -> dict:
         "this_year_estimated_profit": estimated_profit,
         "this_year_estimated_dividend": estimated_div,
         "this_year_estimated_yield": estimated_yield,
+        "this_year_estimated_pe": estimated_pe,
         "note": ctx.note,
     }
 

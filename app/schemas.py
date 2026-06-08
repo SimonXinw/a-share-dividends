@@ -37,6 +37,9 @@ class StockRow(BaseModel):
     this_year_estimated_profit: Optional[Decimal] = Field(None, description="今年预估全年净利润（元）")
     this_year_estimated_dividend: Optional[Decimal] = Field(None, description="今年预估每股分红（元/股）")
     this_year_estimated_yield: Optional[Decimal] = Field(None, description="今年预估股息率")
+    this_year_estimated_pe: Optional[Decimal] = Field(
+        None, description="今年预估 PE = 当前市值（元）/ 今年预估净利润（元）"
+    )
 
     note: Optional[str] = None
     updated_at: Optional[datetime] = None

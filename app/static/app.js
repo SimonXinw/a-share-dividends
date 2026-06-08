@@ -221,6 +221,7 @@ const App = {
             const lyDiv = num(row.last_year_dividend);
             const lyProfit = num(row.last_year_net_profit);
             const tyProfit = num(row.this_year_estimated_profit);
+            const marketCap = num(row.current_market_cap);
 
             row.last_year_dividend_yield =
                 Number.isFinite(lastYearEndPrice) && lastYearEndPrice > 0 && Number.isFinite(lyDiv)
@@ -242,6 +243,14 @@ const App = {
                 row.this_year_estimated_dividend = null;
                 row.this_year_estimated_yield = null;
             }
+
+            row.this_year_estimated_pe =
+                Number.isFinite(marketCap) &&
+                marketCap > 0 &&
+                Number.isFinite(tyProfit) &&
+                tyProfit !== 0
+                    ? marketCap / tyProfit
+                    : null;
         };
 
         const sortByEstimatedYieldDesc = () => {
