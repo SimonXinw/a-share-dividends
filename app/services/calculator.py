@@ -16,7 +16,7 @@
         this_year_estimated_dividend_per_share =
             last_year_dividend_per_share * this_year_estimated_profit / last_year_profit
 4. 今年预估股息率 = this_year_estimated_dividend_per_share / current_price
-5. 今年预估 PE = current_market_cap / this_year_estimated_profit（市值与净利润均为元，结果为无量纲倍数）
+5. 今年预估 PE = current_market_cap / this_year_estimated_profit（总市值与净利润均为元，结果为无量纲倍数）
 
 如果缺少必要数据（去年净利润缺失等），则只展示已有字段，预估字段为 None。
 """
@@ -122,7 +122,7 @@ def calc_yield(dividend_per_share: Decimal | None, price: Decimal | None) -> Dec
 
 
 def calc_pe(market_cap: Decimal | None, net_profit: Decimal | None) -> Decimal | None:
-    """预估 PE = 当前市值（元）/ 今年预估净利润（元），无量纲倍数。"""
+    """预估 PE = 当前总市值（元）/ 今年预估净利润（元），无量纲倍数。"""
     if market_cap is None or net_profit is None or net_profit == 0:
         return None
     return market_cap / net_profit

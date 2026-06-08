@@ -4,10 +4,10 @@ AKShare 是开源的金融数据库，封装了多个免费数据源，无需注
 官网：https://akshare.akfamily.xyz/
 
 关键接口：
-- ak.stock_zh_a_spot_em()                              全市场 A 股实时行情（含名称/最新价/行业）
+- ak.stock_zh_a_daily(symbol="sh600519")               单只股票日线（收盘价 / 去年末收盘价）
+- ak.stock_individual_info_em(symbol="600519")         单只股票基本资料（总股本 / 总市值）
 - ak.stock_fhps_detail_em(symbol="600519")             单只股票分红送配明细（年度分红）
 - ak.stock_profit_sheet_by_report_em(symbol="SH600519") 单只股票季度利润表
-- ak.stock_individual_info_em(symbol="600519")         单只股票基本资料
 
 注意：akshare 是同步阻塞调用，且某些接口偶尔会失败/返回空，
 我们使用 asyncio.to_thread 包一层并加 try/except，失败的股票跳过。
@@ -59,6 +59,46 @@ def _akshare_symbol(code: str) -> str:
     return f"{_market_prefix(code)}{code}"
 
 
+async def _fetch_em_total_shares_and_market_cap(
+    code: str,
+    *,
+    max_attempts: int = 3,
+) -> tuple[Decimal | None, Decimal | None]:
+    """从东方财富个股资料获取总股本（股）与总市值（元）。"""
+    import akshare as ak
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            df = await asyncio.to_thread(ak.stock_individual_info_em, symbol=code)
+            info = dict(zip(df["item"], df["value"]))
+            total_shares = _to_decimal(info.get("总股本"))
+            total_market_cap = _to_decimal(info.get("总市值"))
+            return total_shares, total_market_cap
+        except Exception as e:  # noqa: BLE001
+            if attempt >= max_attempts:
+                logger.warning(
+                    "[%s] 拉取东方财富总股本/总市值失败（第 %d/%d 次）：%s",
+                    code,
+                    attempt,
+                    max_attempts,
+                    e,
+                )
+                return None, None
+
+            wait_seconds = random.randint(1, 3)
+            logger.warning(
+                "[%s] 拉取东方财富总股本/总市值失败（第 %d/%d 次），%d 秒后重试：%s",
+                code,
+                attempt,
+                max_attempts,
+                wait_seconds,
+                e,
+            )
+            await asyncio.sleep(wait_seconds)
+
+    return None, None
+
+
 # ============================================================================
 # 价格同步
 # ============================================================================
@@ -80,7 +120,7 @@ async def _sync_prices_fallback_by_daily(
     codes: list[str],
     progress_cb: ProgressCallback | None = None,
 ) -> int:
-    """降级路径：按股票逐个拉日线，取最新收盘价作为当前价。"""
+    """按股票逐个拉日线取收盘价，并从东方财富取总股本/总市值。"""
     import akshare as ak
     import pandas as pd
 
@@ -169,10 +209,12 @@ async def _sync_prices_fallback_by_daily(
                     )
             return
 
-        latest_share_count = _to_decimal(last_row.get("outstanding_share"))
-        current_market_cap = None
-        if latest_share_count is not None:
-            current_market_cap = price * latest_share_count
+        total_shares, total_market_cap = await _fetch_em_total_shares_and_market_cap(code)
+        current_market_cap = total_market_cap
+        if current_market_cap is None and total_shares is not None:
+            current_market_cap = price * total_shares
+        if total_shares is None and current_market_cap is not None and price != 0:
+            total_shares = current_market_cap / price
 
         last_year = datetime.now(timezone.utc).year - 1
         cutoff = date(last_year, 12, 31)
@@ -187,11 +229,10 @@ async def _sync_prices_fallback_by_daily(
         if year_rows is not None and not year_rows.empty:
             year_last_row = year_rows.iloc[-1]
             year_last_close = _to_decimal(year_last_row.get("close"))
-            year_last_share = _to_decimal(year_last_row.get("outstanding_share"))
             if year_last_close is not None:
                 last_year_end_price = year_last_close
-            if year_last_close is not None and year_last_share is not None:
-                last_year_end_market_cap = year_last_close * year_last_share
+            if year_last_close is not None and total_shares is not None:
+                last_year_end_market_cap = year_last_close * total_shares
             year_last_date = year_last_row.get("date")
             if year_last_date is not None:
                 last_year_end_date = str(year_last_date)[:10]

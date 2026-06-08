@@ -26,9 +26,9 @@ create table if not exists public.a_share_prices (
     code           varchar(10)  primary key references public.a_share_stocks(code) on delete cascade,
     price          numeric(14, 4) not null,                  -- 当前股价
     price_date     date         not null default current_date,
-    current_market_cap numeric(22, 2),                       -- 当前市值（元）
+    current_market_cap numeric(22, 2),                       -- 当前总市值（元，东方财富）
     last_year_end_price numeric(14, 4),                      -- 去年年末最后交易日收盘价
-    last_year_end_market_cap numeric(22, 2),                 -- 去年年末最后交易日市值（元）
+    last_year_end_market_cap numeric(22, 2),                 -- 去年年末总市值（元，年末价×总股本）
     last_year_end_date date,                                 -- 去年年末最后交易日
     updated_at     timestamptz  not null default now()
 );

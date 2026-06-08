@@ -173,7 +173,7 @@
                 </template>
               </el-table-column>
               <el-table-column
-                label="去年末市值(亿)"
+                label="去年末总市值(亿)"
                 width="136"
                 sortable
                 header-cell-class-name="readonly_col_header"
@@ -188,7 +188,7 @@
                 </template>
               </el-table-column>
               <el-table-column
-                label="当前市值(亿)"
+                label="当前总市值(亿)"
                 width="133"
                 sortable
                 header-cell-class-name="readonly_col_header"
@@ -446,10 +446,10 @@
                 计算公式：今年预估净利润 = 去年净利润 - 去年「已替换季度」净利润
                 + 今年已发布季度净利润；今年预估每股分红 = 去年每股分红 ×
                 今年预估净利润 / 去年净利润；今年预估股息率 = 今年预估每股分红 /
-                当前股价；预估 PE = 当前市值（元）/ 今年预估净利润（元），保留两位小数。
+                当前股价；预估 PE = 当前总市值（元）/ 今年预估净利润（元），保留两位小数。
               </li>
               <li>
-                “当前市值/去年年末市值”在股价同步阶段一并更新，所以点「一键同步全部」即可。
+                “当前总市值/去年年末总市值”在股价同步阶段一并更新（总市值取自东方财富，非流通市值），点「一键同步全部」即可。
               </li>
               <li>
                 修改字段后会保存到
